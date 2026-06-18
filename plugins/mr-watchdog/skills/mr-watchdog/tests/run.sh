@@ -280,4 +280,14 @@ printf '{"v":1,"sessions":{"SX":{"started":"2030-01-01T00:00:00+00:00","branches
 assert_eq "yes" "$(env -u HARNESS_AUTO_ENGAGE python3 "$WATCH" engaged --repo "$d" --session SX)" \
   "14. ship's handoff stamp → engaged regardless of mode"
 
+# 15. malformed numeric config coerces to the default — never a ValueError mid-watch (poll/log/timeout)
+cfgnum(){ python3 -c "import sys; sys.path.insert(0,'$SCRIPTS'); import watch; print(watch.load_config('$1')['$2'])"; }
+d="$ROOT/cfgnum"; new_repo "$d"
+printf '{"poll_interval":"abc","log_lines":"x","watch_timeout":[]}' > "$d/.mr-watchdog.json"
+assert_eq 30   "$(cfgnum "$d" poll_interval)" "15. non-numeric poll_interval → default 30"
+assert_eq 200  "$(cfgnum "$d" log_lines)"     "15. non-numeric log_lines → default 200"
+assert_eq 3600 "$(cfgnum "$d" watch_timeout)" "15. non-numeric watch_timeout → default 3600"
+printf '{"poll_interval":5}' > "$d/.mr-watchdog.json"
+assert_eq 5 "$(cfgnum "$d" poll_interval)" "15. a valid numeric override is preserved"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]

@@ -25,7 +25,7 @@
     },
     {
       "name": "delivery-metrics",
-      "version": "1.0.6",
+      "version": "1.0.7",
       "source": "./plugins/delivery-metrics",
       "description": "Generate a developer productivity & quality report (interactive HTML dashboard) from git history — single repo or submodule workspace. Repo-agnostic and configurable.",
       "category": "development",
@@ -33,7 +33,7 @@
     },
     {
       "name": "coding-agent-usage",
-      "version": "1.2.1",
+      "version": "1.2.2",
       "source": "./plugins/coding-agent-usage",
       "description": "Diagnose your own Claude Code usage and benchmark it against Anthropic's published per-developer figures. Parses local transcripts into cost, tokens, sessions, model mix, tool distribution, cache efficiency, thinking and subagent rates, per-project and per-week breakdowns, and renders an interactive HTML dashboard with a log-scale percentile gauge. Benchmark figures are fetched live and cached 24h. Includes a multi-provider view (Claude + Codex + Gemini via ccusage). Cost is computed from a maintained price table and the report flags any tokens billed at a fallback rate (unrecognized model family), so accuracy is auditable rather than assumed. No account access.",
       "category": "development",
@@ -65,7 +65,7 @@
     },
     {
       "name": "mr-watchdog",
-      "version": "3.0.0",
+      "version": "3.0.1",
       "source": "./plugins/mr-watchdog",
       "description": "Triggered by an open merge request, mr-watchdog watches the MR's remote CI as a background task your MAIN session owns: the watcher is launched with run_in_background and tracked by the harness, which re-invokes your session the moment the pipeline resolves — so the verdict reaches you IN the conversation (no detached daemon, no status file, no polling). Strictly read-only — never commits, pushes, or merges. Green → 'ok, all good'; red → it hands back the failing job log so your session fixes the ROOT cause (no bypass), with a verify command to self-check the fix for fake-green (deleted/weakened tests, --no-verify, || true, lowered thresholds). A Stop hook nudges the session to launch the watcher, once per pipeline HEAD — and when the pipeline is already green for the exact HEAD at the Stop, hands the verdict over instead of staying silent. Engaged by ship-when-done's handoff by default; HARNESS_AUTO_ENGAGE=1 lets it also engage on its own for a branch this session pushed (never a stale or someone else's MR). Opt out per repo. Forge-agnostic (GitHub via gh, GitLab via glab). The CI-watch step after ship-when-done → merge-review.",
       "category": "development",

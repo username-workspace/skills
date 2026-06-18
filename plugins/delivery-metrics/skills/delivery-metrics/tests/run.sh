@@ -347,6 +347,27 @@ commit_as "$d2" Bob b@b.b 2026-01-05 "ZV-3 x" x
 err2=$(python3 "$COLLECT" "$d2" 2026-01-01 2026-01-31 3m 2>&1 >/dev/null)
 assert_contains 'no origin/HEAD' "$err2" "22. on-main repo without origin/HEAD also warns (current=trunk, still a guess)"
 
+# 23. malformed config / args degrade gracefully — never a raw Python traceback
+notrace(){ case "$1" in *"Traceback (most recent call last)"*) ko "$2 — raw traceback leaked";; *) ok "$2";; esac; }
+d="$ROOT/robust"; git_init "$d"
+commit_as "$d" Dev dev@x 2026-01-05 "ZV-7 work" "x"
+printf '{"ticket_pattern":"[unterminated"}' > "$ROOT/bad-re.json"
+out=$(python3 "$COLLECT" "$d" 2026-01-01 2026-01-31 3m "$ROOT/bad-re.json" 2>"$ROOT/e"); rc=$?
+notrace "$(cat "$ROOT/e")" "23a. invalid ticket_pattern regex → no traceback"
+assert_eq 0 "$rc" "23a. invalid regex → clean exit"
+printf '%s' "$out" | get "o['metadata']['weeks']" >/dev/null 2>&1 && ok "23a. still produced valid JSON" || ko "23a. still produced valid JSON"
+printf '{"ticket_pattern":"[A-Z]+-[0-9]+"}' > "$ROOT/nogrp.json"
+python3 "$COLLECT" "$d" 2026-01-01 2026-01-31 3m "$ROOT/nogrp.json" >/dev/null 2>"$ROOT/e"; rc=$?
+notrace "$(cat "$ROOT/e")" "23b. capture-group-less pattern + match → no IndexError"
+assert_eq 0 "$rc" "23b. no-capture-group pattern → clean exit"
+printf '{"leaves":[{"start":"2026-01-01","end":"2026-01-05","fraction":1.0}]}' > "$ROOT/badleave.json"
+python3 "$COLLECT" "$d" 2026-01-01 2026-01-31 3m "$ROOT/badleave.json" >/dev/null 2>"$ROOT/e"; rc=$?
+notrace "$(cat "$ROOT/e")" "23c. leave entry missing 'author' → no KeyError"
+assert_eq 0 "$rc" "23c. malformed leave → clean exit"
+python3 "$COLLECT" "$d" "" 2026-01-31 3m >/dev/null 2>"$ROOT/e"; rc=$?
+notrace "$(cat "$ROOT/e")" "23d. non-ISO since → no fromisoformat traceback"
+[ "$rc" -ne 0 ] && ok "23d. invalid date → nonzero exit with a message" || ko "23d. invalid date → nonzero exit with a message"
+
 echo
 echo "PASS=$PASS FAIL=$FAIL"
 rm -rf "$ROOT"

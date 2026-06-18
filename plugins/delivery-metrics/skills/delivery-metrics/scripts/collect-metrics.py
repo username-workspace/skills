@@ -48,6 +48,20 @@ DEFAULTS = {
 }
 
 
+def compile_pattern(pattern, default, label, flags=0, need_group=False):
+    """Compile a user-supplied regex, falling back to the default with a warning when it is invalid —
+    or, when a capture group is required (the ticket id), when it has none. Keeps a bad config value
+    from raising a raw traceback (or an IndexError on group(1) later)."""
+    try:
+        rx = re.compile(pattern, flags)
+        if need_group and rx.groups < 1:
+            raise re.error("no capture group")
+        return rx
+    except re.error as e:
+        print(f"WARN: invalid {label} {pattern!r} ({e}); using the default", file=sys.stderr)
+        return re.compile(default, flags)
+
+
 def run_git(repo_path, args, timeout=120):
     try:
         r = subprocess.run(["git"] + args, cwd=repo_path, capture_output=True, text=True, timeout=timeout)
@@ -192,6 +206,13 @@ def main():
     period = sys.argv[4] if len(sys.argv) > 4 else ""
     cfg = load_config(root, sys.argv[5] if len(sys.argv) > 5 else None)
 
+    for label, value in (("since", since), ("until", until)):
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            print(f"ERROR: {label} '{value}' is not an ISO date (YYYY-MM-DD)", file=sys.stderr)
+            sys.exit(2)
+
     # Clamp the window to the last complete week (drop the in-progress week per the clock).
     until = min(date.fromisoformat(until), last_complete_week_end()).isoformat()
 
@@ -209,12 +230,15 @@ def main():
             print(f"WARN: availability_command failed ({e}); continuing without it", file=sys.stderr)
 
     alias = cfg["author_aliases"]
-    ticket_re = re.compile(cfg["ticket_pattern"])
-    fix_re = re.compile(cfg["fix_pattern"], re.IGNORECASE)
+    ticket_re = compile_pattern(cfg["ticket_pattern"], DEFAULTS["ticket_pattern"], "ticket_pattern", need_group=True)
+    fix_re = compile_pattern(cfg["fix_pattern"], DEFAULTS["fix_pattern"], "fix_pattern", flags=re.IGNORECASE)
     revert_re = re.compile(r"^revert\b", re.IGNORECASE)
     holidays = set(cfg["holidays"])
     leaves_by_author = defaultdict(list)
     for lv in cfg["leaves"]:
+        if not (isinstance(lv, dict) and isinstance(lv.get("author"), str) and lv.get("start") and lv.get("end")):
+            print(f"WARN: skipping malformed leave entry {lv!r} (needs author/start/end)", file=sys.stderr)
+            continue
         leaves_by_author[alias.get(lv["author"], lv["author"])].append(lv)
 
     all_commits = []
