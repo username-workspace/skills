@@ -1,6 +1,8 @@
 # Harness Structural Hardening — Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **Status: Shipped** (2026-06-11, PRs #41–#46, plus follow-ups #47–#54). This is a historical design
+> record, not pending work. For the system as it stands today, read
+> [docs/architecture.md](../architecture.md).
 
 **Goal:** Eliminate the harness's structural weaknesses — intent inferred from state deltas, self-review, state-file fragility, gate latency, and the untested turn-boundary gap — replacing each inference rule with an observed fact or an enforced invariant, and deleting the dead code each replacement orphans.
 
