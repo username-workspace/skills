@@ -1,7 +1,11 @@
 # skills
 
+[![tests](https://github.com/username-workspace/skills/actions/workflows/ci.yml/badge.svg)](https://github.com/username-workspace/skills/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
 Open, horizontal, re-usable Claude Code skills & plugins by **Username** ([Studio A.I.](https://username.digital)).
-Company-specific (vertical) skills live in a separate private repo.
+Dependency-free (stdlib Python + bash + git), each one useful on its own. Company-specific (vertical)
+skills live in a separate private repo.
 
 ## Install
 
@@ -12,8 +16,8 @@ Company-specific (vertical) skills live in a separate private repo.
 
 ## The delivery harness
 
-Four of these plugins compose into an autonomous delivery pipeline — each one useful alone, loosely
-coupled through `.git` state when together:
+Four of these plugins compose into a delivery pipeline — each one useful alone, loosely coupled through
+`.git` state when together:
 
 **ship-when-done** commits at each milestone and opens the draft PR only when the work is provably
 done (quality gate green) → **merge-review** holds every push until an adversarial review passes →
@@ -48,8 +52,18 @@ its own.
 Every plugin ships a hermetic test suite — `bash scripts/run-tests.sh` runs them all (CI gate).
 Real usage is validated separately: a generative E2E lane (`tests/e2e/`) replays full deliveries —
 seeded scenarios, project archetypes, human-divergence twists — against a real sandbox forge, and
-every proven situation is recorded in `tests/e2e/coverage.json`. Engineering rules (the incident
-rule, symptom vs root cause) live in [CLAUDE.md](./CLAUDE.md).
+every proven situation is recorded (with the harness commit it was proven against) in
+`tests/e2e/coverage.json`.
+
+## Documentation
+
+- **[docs/architecture.md](./docs/architecture.md)** — how the marketplace is built: plugin anatomy,
+  the vendored kernel, `.git`-local state and sibling coupling, the delivery harness, engagement modes,
+  the test architecture, and the security model.
+- **[CONTRIBUTING.md](./CONTRIBUTING.md)** — the contributor workflow: the gate, the incident rule
+  (evidence-first, symptom vs root cause), adding a plugin, versioning, and the self-hosted delivery.
+- **[CLAUDE.md](./CLAUDE.md)** — the binding engineering rules, loaded into an agent's context.
+- Each plugin's **`SKILL.md`** documents its behaviour.
 
 ## License
 
