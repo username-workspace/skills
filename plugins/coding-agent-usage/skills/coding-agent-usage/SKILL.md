@@ -7,8 +7,9 @@ description: >-
   breakdowns — then renders an interactive HTML dashboard with a percentile placement (where you sit
   in the population of Claude Code developers). Cost is computed from a maintained price table and the
   report flags any tokens billed at a fallback rate (unrecognized model family), so accuracy is
-  auditable rather than assumed. No network, no account access. Use when asked to evaluate Claude Code
-  usage, estimate spend, benchmark against other developers, or prepare usage/percentile figures.
+  auditable rather than assumed. The benchmark figures are fetched live (cached 24h, with a committed
+  offline seed as fallback); no account access. Use when asked to evaluate Claude Code usage, estimate
+  spend, benchmark against other developers, or prepare usage/percentile figures.
 ---
 
 # Claude Code — Usage Diagnosis

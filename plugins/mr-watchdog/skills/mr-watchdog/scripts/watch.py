@@ -39,6 +39,12 @@ def load_config(repo, path=None):
                 cfg.update(json.load(open(p)))
             except Exception:
                 pass
+    for k in ("poll_interval", "log_lines", "watch_timeout"):  # a bad value must never crash mid-watch
+        try:
+            cfg[k] = int(cfg[k])
+        except (TypeError, ValueError):
+            print(f"[mr-watchdog] WARN: non-numeric {k}={cfg[k]!r}; using {DEFAULTS[k]}", file=sys.stderr)
+            cfg[k] = DEFAULTS[k]
     return cfg
 
 
@@ -353,7 +359,13 @@ def cmd_run(args):
         print(f"[mr-watchdog] not watching: {e}")
         return
     head = head_sha(repo)
-    deadline = time.time() + float(args.timeout or cfg.get("watch_timeout", 3600))
+    try:
+        timeout = float(args.timeout) if args.timeout else cfg["watch_timeout"]
+    except ValueError:
+        print(f"[mr-watchdog] WARN: non-numeric --timeout {args.timeout!r}; using {cfg['watch_timeout']}",
+              file=sys.stderr)
+        timeout = cfg["watch_timeout"]
+    deadline = time.time() + timeout
     errors = 0
     while True:
         if cur_branch(repo) != branch or head_sha(repo) != head:
