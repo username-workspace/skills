@@ -123,6 +123,10 @@ plugin degrades to inert rather than crash.
 | `mr-watchdog-watch.json` | mr-watchdog | per-HEAD watch dedup |
 | `proof-of-fix.json` | proof-of-fix | the active repro (command + recorded red verdict) |
 
+This lists the coupling and observability state. Per-session nudge-dedup markers (e.g.
+`proof-of-fix-nudge.json`) and the trusted config files (`.git/<plugin>.json`, §8) live under `.git/`
+too but are not coupling state.
+
 **Sibling coupling** goes *through* these files, and degrades to inert when the sibling is absent:
 
 - ship-when-done **holds a push** while a `merge-review` gate is pending (it reads merge-review's
