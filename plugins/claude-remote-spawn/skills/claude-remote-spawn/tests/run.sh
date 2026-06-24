@@ -18,6 +18,13 @@ echo "\$*" >> "$ROOT/script.cap"
 exit 0
 EOF
 chmod +x "$ROOT/bin/script"
+# stub osascript so 'open' never opens a real terminal tab — record args + the AppleScript it's fed
+cat > "$ROOT/bin/osascript" <<EOF
+#!/usr/bin/env bash
+{ printf 'ARGS:%s\n' "\$*"; cat; printf '\n---\n'; } >> "$ROOT/osascript.cap"
+exit 0
+EOF
+chmod +x "$ROOT/bin/osascript"
 export PATH="$ROOT/bin:$PATH"
 
 # --- helpers ---
@@ -32,6 +39,10 @@ run(){ CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJ
        bash "$DRIVER" "$@" 2>&1; }
 run_rc(){ CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" \
           bash "$DRIVER" "$@" 2>&1; echo "$?"; }
+# 'open' reads TERM_PROGRAM to pick the terminal — default iTerm.app, override via $TP
+open_run(){    CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" \
+               TERM_PROGRAM="${TP:-iTerm.app}" bash "$DRIVER" "$@" 2>&1; }
+open_run_rc(){ open_run "$@"; echo "$?"; }
 
 echo "claude-remote-spawn driver.sh tests"
 
@@ -245,6 +256,83 @@ sleep 0.3
 run stop "$handle" >/dev/null 2>&1 || true
 sleep 0.3
 pgrep -g "$pg" >/dev/null 2>&1 && ko "23. group survived stop — tail/process leaked" || ok "23. stop kills the whole group (no tail leak)"
+
+# 24. open <name> (iTerm) → opens a tab via osascript, records a window-mode session, builds a launcher
+: > "$ROOT/osascript.cap"
+out=$(open_run open winalpha)
+assert_contains "winalpha" "$out" "24. open → returns the handle"
+assert_contains "terminal tab" "$out" "24. open → reports it opened a tab"
+assert_contains "mode=window" "$(cat "$STATE/winalpha.spawn" 2>/dev/null)" "24. open → records mode=window"
+assert_contains "--remote-control winalpha" "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher runs claude --remote-control <name>"
+assert_contains "-n winalpha" "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher sets the display name"
+assert_contains "close-tab" "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher self-closes its tab when the session ends"
+assert_absent "exec " "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher does NOT exec (must regain control to close the tab)"
+assert_contains "ARGS" "$(cat "$ROOT/osascript.cap" 2>/dev/null)" "24. open → osascript was invoked"
+assert_contains "create tab" "$(cat "$ROOT/osascript.cap" 2>/dev/null)" "24. open (iTerm) → asks for a tab"
+run stop winalpha >/dev/null 2>&1 || true
+
+# 25. open --model → passed through to the launcher and recorded in state
+out=$(open_run open winmodel --model claude-fable-5)
+assert_contains "--model claude-fable-5" "$(cat "$STATE/winmodel.cmd" 2>/dev/null)" "25. open --model → in launcher"
+assert_contains "model=claude-fable-5" "$(cat "$STATE/winmodel.spawn" 2>/dev/null)" "25. open --model → recorded in state"
+run stop winmodel >/dev/null 2>&1 || true
+
+# 26. open --prompt → initial instruction becomes claude's trailing positional in the launcher
+out=$(open_run open winprompt --prompt "executetheplan42 phase by phase")
+assert_contains "executetheplan42" "$(cat "$STATE/winprompt.cmd" 2>/dev/null)" "26. open --prompt → in launcher"
+run stop winprompt >/dev/null 2>&1 || true
+out=$(open_run_rc open --prompt); rc="${out##*$'\n'}"; body="${out%$'\n'*}"
+assert_eq 1 "$rc" "26. open --prompt (no value) → exit 1"
+assert_contains "--prompt needs a value" "$body" "26. open --prompt (no value) → clear message"
+
+# 27. open --model with no value → exit 1
+out=$(open_run_rc open --model); rc="${out##*$'\n'}"; body="${out%$'\n'*}"
+assert_eq 1 "$rc" "27. open --model (no value) → exit 1"
+assert_contains "--model needs a value" "$body" "27. open --model (no value) → clear message"
+
+# 28. open a name that already exists → exit 1
+printf 'name=dup\ncwd=/tmp\nstarted=x\nmode=window\n' > "$STATE/dup.spawn"
+out=$(open_run_rc open dup); rc="${out##*$'\n'}"; body="${out%$'\n'*}"
+assert_eq 1 "$rc" "28. open (existing name) → exit 1"
+assert_contains "already exists" "$body" "28. open (existing name) → clear message"
+rm -f "$STATE/dup.spawn"
+
+# 29. open from a terminal we can't script → exit 1, NO phantom session, launcher kept for manual run
+TP=Ghostty; out=$(open_run_rc open winghost); unset TP
+rc="${out##*$'\n'}"; body="${out%$'\n'*}"
+assert_eq 1 "$rc" "29. open (unsupported terminal) → exit 1"
+assert_contains "winghost.cmd" "$body" "29. open (unsupported) → points at the runnable launcher"
+[ ! -e "$STATE/winghost.spawn" ] && ok "29. open (unsupported) → no phantom session recorded" || ko "29. open (unsupported) → recorded a session that never opened"
+[ -e "$STATE/winghost.cmd" ] && ok "29. open (unsupported) → launcher left runnable" || ko "29. open (unsupported) → launcher missing"
+rm -f "$STATE/winghost.cmd"
+
+# 30. SECURITY: open slugifies a hostile name — no path traversal out of STATE_DIR
+out=$(open_run open "../outside/evil")
+handle="$(echo "$out" | head -1)"
+assert_eq "outside-evil" "$handle" "30. open hostile name slugified"
+[ ! -e "$ROOT/outside" ] && ok "30. open → nothing written outside STATE_DIR" || ko "30. open → path traversal: wrote outside STATE_DIR"
+run stop "$handle" >/dev/null 2>&1 || true
+
+# 31. stop removes the window-mode launcher + state together
+out=$(open_run open winstop)
+[ -e "$STATE/winstop.cmd" ] && ok "31. open → launcher created" || ko "31. open → launcher missing"
+run stop winstop >/dev/null 2>&1 || true
+{ [ ! -e "$STATE/winstop.spawn" ] && [ ! -e "$STATE/winstop.cmd" ]; } && ok "31. stop → removes window state + launcher" || ko "31. stop → left window state/launcher behind"
+
+# 32. close-tab (iTerm) → asks iTerm to close the launcher's OWN session, by its guid, from the tab env
+: > "$ROOT/osascript.cap"
+out=$(CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" \
+      TERM_PROGRAM=iTerm.app ITERM_SESSION_ID="w0t0p0:GUID-abc-123" bash "$DRIVER" close-tab; echo "rc=$?")
+cap="$(cat "$ROOT/osascript.cap" 2>/dev/null)"
+assert_contains "rc=0" "$out" "32. close-tab → always exits 0 (best-effort)"
+assert_contains "close s" "$cap" "32. close-tab (iTerm) → asks iTerm to close the session"
+assert_contains "GUID-abc-123" "$cap" "32. close-tab → targets the tab's own session guid"
+
+# 32b. close-tab on a terminal it can't script → no osascript call, still exits 0
+: > "$ROOT/osascript.cap"
+out=$(CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" TERM_PROGRAM=Ghostty bash "$DRIVER" close-tab; echo "rc=$?")
+assert_contains "rc=0" "$out" "32b. close-tab (unsupported) → exit 0 (no-op)"
+assert_eq "" "$(cat "$ROOT/osascript.cap" 2>/dev/null)" "32b. close-tab (unsupported) → no osascript call"
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"
