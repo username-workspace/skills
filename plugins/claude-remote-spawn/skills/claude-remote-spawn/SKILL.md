@@ -1,6 +1,6 @@
 ---
 name: claude-remote-spawn
-description: Spawn a PERSISTENT, VISIBLE Claude Code session you can drive from your phone or desktop (Remote Control). Runs `claude --remote-control <name>` inside a PTY so it appears in `claude agents` and in Remote Control and stays alive until you stop it. Terminal-agnostic, cross-platform (macOS + Linux). Use when asked to spawn a remote-controllable Claude session, launch a persistent agent you can steer from your phone, keep a Claude session running detached from your terminal, or resume/respawn an existing session remotely from its id (or from a description, by composing with the find-session skill). Subcommands via driver.sh — spawn / resume / list / stop / check.
+description: Spawn a PERSISTENT, VISIBLE Claude Code session you can drive from your phone or desktop (Remote Control). Runs `claude --remote-control <name>` inside a PTY so it appears in `claude agents` and in Remote Control and stays alive until you stop it. Terminal-agnostic, cross-platform (macOS + Linux). Or `open` the session in a NEW local terminal tab (macOS iTerm/Terminal.app) to watch and drive it live where you launched it — no dependency, ephemeral (closing the tab ends it). Use when asked to spawn a remote-controllable Claude session, launch a persistent agent you can steer from your phone, keep a Claude session running detached from your terminal, open a child session in a visible local terminal tab, or resume/respawn an existing session remotely from its id (or from a description, by composing with the find-session skill). Subcommands via driver.sh — spawn / open / resume / list / stop / check.
 ---
 
 # claude-remote-spawn
@@ -18,7 +18,8 @@ for `--dangerously-skip-permissions`, or `CRS_HEADLESS_PERM_FLAGS` for an exact 
 
 | Subcommand | Effect |
 |---|---|
-| `spawn [name] [--model M] [--prompt 'text']` | Launch a **persistent, visible** session; name from context (else NATO: alpha/bravo/charlie…). `--prompt` submits an initial instruction, so the session starts working unattended |
+| `spawn [name] [--model M] [--prompt 'text']` | Launch a **persistent, detached** session (Remote Control + phone); name from context (else NATO: alpha/bravo/charlie…). `--prompt` submits an initial instruction, so the session starts working unattended |
+| `open [name] [--model M] [--prompt 'text']` | Launch the session in a **new local terminal tab** (macOS iTerm/Terminal.app) so you see and drive it **live where you launched it** — **ephemeral**: closing the tab ends it (no phone-driving after) |
 | `resume <id> [name] [--in-place] [--model M]` | Respawn an **existing** session by id; forks a fresh drivable id by default (`--in-place` = same id) |
 | `list` | List spawned sessions (live/dead, with the model if one was set) |
 | `stop <name>` | Stop a session (kills the PTY + claude, cleans state) |
@@ -56,6 +57,25 @@ Sessions should be **recognizable**, not random:
 - It's a **long-running, visible** session — not a one-shot that exits immediately and leaves nothing
   to drive.
 
+## `open` — run it in a local terminal tab
+
+`open` is the alternative to `spawn` when you want to **see and drive the session in your own
+terminal**, where you launched the skill — not only from your phone:
+
+    driver.sh open [name] [--model M] [--prompt 'text']
+
+- It opens a **new tab** in the terminal that launched the skill (detected via `$TERM_PROGRAM`:
+  **iTerm.app** or **Apple_Terminal**) and runs `claude --remote-control <name>` directly in it.
+- While the tab is open the session is a normal Remote-Control session too (shows up in `claude
+  agents`, drivable from the phone). It also appears in `list` (marked `window`) and `stop` works.
+- **It is ephemeral by design.** There is no detach engine (no tmux/screen), so the session's life is
+  tied to the tab: **close the tab and the session ends** — and there's no phone-driving after that.
+  This is the deliberate trade for "no dependency, visible in my terminal". When you need a session
+  that survives and stays phone-drivable, use `spawn` instead.
+- On a terminal it can't script (anything other than iTerm/Terminal.app, or Linux/headless), `open`
+  doesn't fail silently: it prints the path of a ready-to-run launcher you can execute in **any**
+  terminal yourself.
+
 ## Resume an existing session
 
 `resume` respawns a **past** session as a Remote-Control session, so you can pick it back up from
@@ -79,8 +99,9 @@ your phone:
 - **cwd must be a TRUSTED folder** — otherwise the session blocks on Claude Code's
   workspace-trust dialog and never registers (stays invisible). Runs in `$PWD`; override
   with `CRS_SPAWN_CWD`.
-- Needs `script(1)` (present on macOS + Linux).
-- State lives in `~/.claude/headless/<name>.{spawn,log}`.
+- `spawn`/`resume` need `script(1)` (present on macOS + Linux); `open` needs `osascript` (macOS) to
+  open the tab.
+- State lives in `~/.claude/headless/<name>.{spawn,log}` (plus `<name>.cmd`, the launcher, for `open`).
 
 ## Env
 
