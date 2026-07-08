@@ -1,0 +1,12 @@
+{
+  "name": "integrity-audit",
+  "version": "1.0.0",
+  "description": "Audit a repository against its OWN declared constitution — invariants (CLAUDE.md/AGENTS.md), ADRs, contracts (schemas), executable guards (CI tests, hooks) — to detect drift across six universal classes (enforcement, deployment-value, contract, robustness, duplication, hygiene) and, on demand, remediate at the root cause with a derived guard so the class cannot recur. Three modes: AUDIT (report with citations), REMEDIATE (fix lot by lot, gate green between lots), REALIGN (diff-scoped: check current work against the core design). Horizontal: any language, any repo.",
+  "author": {
+    "name": "Username",
+    "email": "admin@username.digital"
+  },
+  "homepage": "https://github.com/username-workspace/skills/tree/main/plugins/integrity-audit",
+  "repository": "https://github.com/username-workspace/skills",
+  "license": "MIT"
+}

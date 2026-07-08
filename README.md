@@ -42,6 +42,7 @@ its own.
 | [`mr-watchdog`](./plugins/mr-watchdog) | 3.0.1 | DevOps | Open a merge request, then forget it — a background watcher follows its CI and hands the verdict back to your session. |
 | [`ship-when-done`](./plugins/ship-when-done) | 2.0.0 | DevOps | Commit at each milestone, push so nothing is lost, open the PR when it's actually done. |
 | [`coding-agent-usage`](./plugins/coding-agent-usage) | 1.2.2 | FinOps | See your AI coding-agent usage — and where you rank against other developers. |
+| [`integrity-audit`](./plugins/integrity-audit) | 1.0.0 | Quality | Hold a codebase to the standard it set for itself. |
 | [`merge-review`](./plugins/merge-review) | 2.0.0 | Quality | An adversarial reviewer that scores the diff, fixes what's attested, and loops until it's merge-ready. |
 | [`proof-of-fix`](./plugins/proof-of-fix) | 1.0.4 | Quality | Prove the bug before fixing it — then prove the fix with the same probe. Red before, green after. |
 | [`security-audit`](./plugins/security-audit) | 1.3.3 | Security | One Trivy scan, every ecosystem — a prioritised security report. |
