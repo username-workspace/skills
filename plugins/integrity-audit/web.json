@@ -1,0 +1,16 @@
+{
+  "category": "Quality",
+  "tagline": "Hold a codebase to the standard it set for itself.",
+  "summary": "An on-demand integrity audit that reads the repository's own constitution — declared invariants (CLAUDE.md/AGENTS.md), decision records, contracts and executable guards — then sweeps the code for drift across six universal classes: enforcement (authorization broader than declared, paths around the sole control point), deployment-value (silent tenant/region fallbacks that make a fresh deployment impersonate the first one), contract (schemas nothing loads, copies without drift tests), robustness (I/O without timeouts, silent-loss windows, unbounded reads), duplication and hygiene. Every candidate finding is counter-validated line by line in source and must cite the invariant it violates. In REMEDIATE mode it fixes at the root cause and ships a CI guard derived from the project's own sources of truth, so the drift class cannot recur; in REALIGN mode it judges a branch or diff against the core design before it lands.",
+  "capabilities": [
+    "Derives the audit reference from the repo itself — invariants, ADRs, schemas, guard tests — and cites it in every finding; no invented principles",
+    "Sweeps six universal drift classes with concrete detection heuristics and grep recipes, adapted to the repo's language",
+    "Counter-validates every candidate in source before reporting; discarded candidates are counted as evidence of rigor",
+    "Severity set by the constitution, not the class: invariant-breaking authorization drift is critical, hygiene is minor",
+    "REMEDIATE fixes root causes only — one lot per severity theme, one commit per lot, the project's own gate green between lots",
+    "Every fixed class ships a derived guard (forbidden sets computed from the registry/config, drift tests against the source of truth) — integrity enforced, not documented",
+    "REALIGN mode audits only a diff: drift introduced and guards weakened (deleted/loosened tests, widened allowlists) before merge",
+    "Report-only by default; flags acceptance criteria that can only be validated live instead of faking them"
+  ],
+  "platforms": ["macOS", "Linux"]
+}

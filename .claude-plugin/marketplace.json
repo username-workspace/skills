@@ -86,6 +86,14 @@
       "description": "Evidence-first bug fixing: prove the bug BEFORE touching code (record runs the probe and accepts it only if it FAILS), fix the root cause, then prove the fix with the SAME probe (check passes only when it runs green) — red before, green after, same command. Auto-engaging: a bug-shaped prompt (en/fr) injects the protocol into context once per session per repo, and a Stop hook re-runs an open repro itself — auto-closing it on green, blocking with the failing output on red (one attempt per work-state, capped — never a Stop loop). The best probe is a real test committed with the fix, so the repro becomes a permanent regression guard. State in .git, never committed; opt out per repo. Horizontal: any repo, any stack — git + Python stdlib only.",
       "category": "development",
       "homepage": "https://github.com/username-workspace/skills/tree/main/plugins/proof-of-fix"
+    },
+    {
+      "name": "integrity-audit",
+      "version": "1.0.0",
+      "source": "./plugins/integrity-audit",
+      "description": "On-demand integrity audit against the repo's OWN constitution (invariants, ADRs, schemas, CI guards): detects drift across six universal classes (enforcement, deployment-value fallbacks, contract, robustness, duplication, hygiene), counter-validates every finding in source with citations, and on demand remediates at the root cause shipping a derived CI guard so the class cannot recur. AUDIT / REMEDIATE / REALIGN (diff-scoped) modes. Horizontal: any language, any repo.",
+      "category": "development",
+      "homepage": "https://github.com/username-workspace/skills/tree/main/plugins/integrity-audit"
     }
   ]
 }
