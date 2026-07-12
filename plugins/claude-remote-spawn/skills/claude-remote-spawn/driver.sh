@@ -101,9 +101,9 @@ OSA
 }
 
 usage(){ cat >&2 <<EOF
-usage: driver.sh <spawn|open|resume|list|stop|check> [args]
+usage: driver.sh [open|spawn|resume|list|stop|check] [args]   (subcommand omitted → 'open')
+  open  [name] [--model M] [--prompt 'text']  DEFAULT — launch a session in a NEW LOCAL terminal tab (iTerm/Terminal.app); ephemeral — close the tab to stop
   spawn [name] [--model M] [--prompt 'text']  launch a DETACHED, persistent session (Remote Control + phone), survives until 'stop'
-  open  [name] [--model M] [--prompt 'text']  launch a session in a NEW LOCAL terminal tab (iTerm/Terminal.app); ephemeral — close the tab to stop
   resume <id> [name] [--in-place] [--model M]  respawn an existing session by id (forks a fresh id; --in-place=same id)
   list                     list spawned sessions (live/dead)
   stop <name>              stop a session
@@ -121,7 +121,14 @@ env: CRS_CLAUDE_BIN, CRS_HEADLESS_STATE, CRS_SPAWN_CWD,
 EOF
 exit 2; }
 
-cmd="${1:-}"; shift || true
+# 'open' is the default subcommand: a bare invocation, or a first token that
+# isn't a known subcommand/help flag (i.e. a session name or a flag), runs
+# 'open' with the original args preserved.
+case "${1:-}" in
+  spawn|open|resume|list|stop|check|close-tab) cmd="$1"; shift ;;
+  -h|--help)                                   cmd="$1"; shift ;;
+  *)                                           cmd="open" ;;
+esac
 case "$cmd" in
   spawn)
     need_claude; need_script

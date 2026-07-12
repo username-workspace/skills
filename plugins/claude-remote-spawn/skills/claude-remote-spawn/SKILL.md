@@ -14,12 +14,15 @@ for `--dangerously-skip-permissions`, or `CRS_HEADLESS_PERM_FLAGS` for an exact 
 
 ## Usage
 
-    driver.sh <spawn|resume|list|stop|check> [args]
+    driver.sh [open|spawn|resume|list|stop|check] [args]
+
+**`open` is the default** — a bare invocation (or a first token that isn't a known subcommand,
+e.g. just a session name) runs `open`.
 
 | Subcommand | Effect |
 |---|---|
-| `spawn [name] [--model M] [--prompt 'text']` | Launch a **persistent, detached** session (Remote Control + phone); name from context (else NATO: alpha/bravo/charlie…). `--prompt` submits an initial instruction, so the session starts working unattended |
-| `open [name] [--model M] [--prompt 'text']` | Launch the session in a **new local terminal tab** (macOS iTerm/Terminal.app) so you see and drive it **live where you launched it** — **ephemeral**: closing the tab ends it (no phone-driving after) |
+| `open [name] [--model M] [--prompt 'text']` | **DEFAULT.** Launch the session in a **new local terminal tab** (macOS iTerm/Terminal.app) so you see and drive it **live where you launched it** — **ephemeral**: closing the tab ends it (no phone-driving after). `--prompt` submits an initial instruction, so the session starts working unattended |
+| `spawn [name] [--model M] [--prompt 'text']` | Launch a **persistent, detached** session (Remote Control + phone); name from context (else NATO: alpha/bravo/charlie…) |
 | `resume <id> [name] [--in-place] [--model M]` | Respawn an **existing** session by id; forks a fresh drivable id by default (`--in-place` = same id) |
 | `list` | List spawned sessions (live/dead, with the model if one was set) |
 | `stop <name>` | Stop a session (kills the PTY + claude, cleans state) |
