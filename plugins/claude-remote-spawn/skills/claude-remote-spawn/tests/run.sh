@@ -25,6 +25,23 @@ cat > "$ROOT/bin/osascript" <<EOF
 exit 0
 EOF
 chmod +x "$ROOT/bin/osascript"
+# stub sudo + pmset so keep-awake NEVER touches real power settings — sudo records its argv, pmset
+# reports the power source from $ROOT/power (default AC). Tests flip $ROOT/power / inspect sudo.cap.
+echo "AC Power" > "$ROOT/power"
+cat > "$ROOT/bin/sudo" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >> "$ROOT/sudo.cap"
+exit 0
+EOF
+chmod +x "$ROOT/bin/sudo"
+cat > "$ROOT/bin/pmset" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+  *batt*) echo "Now drawing from '\$(cat "$ROOT/power" 2>/dev/null || echo "AC Power")'" ;;
+  *) exit 0 ;;
+esac
+EOF
+chmod +x "$ROOT/bin/pmset"
 export PATH="$ROOT/bin:$PATH"
 
 # --- helpers ---
@@ -50,12 +67,13 @@ echo "claude-remote-spawn driver.sh tests"
 bash -n "$DRIVER" 2>/dev/null
 assert_eq 0 "$?" "1. bash -n — script is syntactically valid"
 
-# 2. no args → exit 2 + usage
-out=$(run_rc)
-rc="${out##*$'\n'}"
-body="${out%$'\n'*}"
-assert_eq 2 "$rc" "2. no args → exit 2"
-assert_contains "usage:" "$body" "2. no args → prints usage"
+# 2. no args → defaults to 'open' (a bare `driver.sh` opens a session)
+out=$(open_run); rc=$?
+handle="$(echo "$out" | head -1)"
+assert_eq 0 "$rc" "2. no args → exit 0 (defaults to open)"
+assert_contains "terminal tab" "$out" "2. no args → opened a session"
+assert_contains "mode=window" "$(cat "$STATE/$handle.spawn" 2>/dev/null)" "2. no args → recorded a window session"
+run stop "$handle" >/dev/null 2>&1 || true
 
 # 3. -h → exit 2 + usage
 out=$(run_rc -h)
@@ -71,12 +89,13 @@ body="${out%$'\n'*}"
 assert_eq 2 "$rc" "4. --help → exit 2"
 assert_contains "usage:" "$body" "4. --help → prints usage"
 
-# 5. unknown subcommand → exit 1 + clear message
+# 5. unknown/typo subcommand → exit 1 + clear error, and MUST NOT silently open a mis-named session
 out=$(run_rc foobar)
 rc="${out##*$'\n'}"
 body="${out%$'\n'*}"
 assert_eq 1 "$rc" "5. unknown subcommand → exit 1"
 assert_contains "unknown subcommand" "$body" "5. unknown subcommand → clear error"
+{ [ ! -e "$STATE/foobar.spawn" ] && [ ! -e "$STATE/foobar.cmd" ]; } && ok "5. typo did NOT create a session/launcher" || ko "5. typo silently created a session/launcher"
 
 # 6. stop with no name → exit 1
 out=$(run_rc stop)
@@ -333,6 +352,63 @@ assert_contains "GUID-abc-123" "$cap" "32. close-tab → targets the tab's own s
 out=$(CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" TERM_PROGRAM=Ghostty bash "$DRIVER" close-tab; echo "rc=$?")
 assert_contains "rc=0" "$out" "32b. close-tab (unsupported) → exit 0 (no-op)"
 assert_eq "" "$(cat "$ROOT/osascript.cap" 2>/dev/null)" "32b. close-tab (unsupported) → no osascript call"
+
+# 33–38. keep-awake (macOS only — the feature is a no-op on Linux, so the assertions can't hold there)
+if [ "$(uname -s)" = Darwin ]; then
+  wa_sp(){ sp="$(sed -n 's/^subshell=//p' "$STATE/$1.spawn" 2>/dev/null | head -1)"; [ -n "$sp" ] && { pkill -P "$sp" 2>/dev/null; kill "$sp" 2>/dev/null; }; run stop "$1" >/dev/null 2>&1 || true; }
+
+  # 33. spawn on AC → keep-awake enabled: sudo asked to set disablesleep 1 (lid-closed sleep off)
+  echo "AC Power" > "$ROOT/power"; : > "$ROOT/sudo.cap"; rm -f "$STATE/.keepawake-warned"
+  out=$(run spawn wakealpha)
+  assert_contains "/usr/bin/pmset disablesleep 1" "$(cat "$ROOT/sudo.cap" 2>/dev/null)" "33. spawn on AC → holds the Mac awake (disablesleep 1)"
+  wa_sp wakealpha
+
+  # 34. spawn on battery → never fights the battery: holds 0, not 1
+  echo "Battery Power" > "$ROOT/power"; : > "$ROOT/sudo.cap"
+  out=$(run spawn wakebatt)
+  assert_contains "/usr/bin/pmset disablesleep 0" "$(cat "$ROOT/sudo.cap" 2>/dev/null)" "34. spawn on battery → does not hold sleep (disablesleep 0)"
+  assert_absent "disablesleep 1" "$(cat "$ROOT/sudo.cap" 2>/dev/null)" "34. spawn on battery → never sets disablesleep 1"
+  echo "AC Power" > "$ROOT/power"
+  wa_sp wakebatt
+
+  # 35. stop of the last (no live) session → releases the hold (disablesleep 0)
+  out=$(run spawn wakerel); handle="$(echo "$out" | head -1)"
+  sp="$(sed -n 's/^subshell=//p' "$STATE/$handle.spawn" 2>/dev/null | head -1)"; [ -n "$sp" ] && { pkill -P "$sp" 2>/dev/null; kill "$sp" 2>/dev/null; }
+  : > "$ROOT/sudo.cap"
+  run stop "$handle" >/dev/null 2>&1 || true
+  assert_contains "/usr/bin/pmset disablesleep 0" "$(cat "$ROOT/sudo.cap" 2>/dev/null)" "35. stop last session → releases the hold (disablesleep 0)"
+
+  # 36. CRS_KEEPAWAKE=0 → keep-awake fully disabled: NO sudo call at all
+  : > "$ROOT/sudo.cap"
+  out=$(CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" \
+        CRS_KEEPAWAKE=0 bash "$DRIVER" spawn wakeoff 2>&1)
+  assert_eq "" "$(cat "$ROOT/sudo.cap" 2>/dev/null)" "36. CRS_KEEPAWAKE=0 → no sudo/pmset call"
+  wa_sp wakeoff
+
+  # 37. check reports keep-awake status
+  out=$(run check)
+  assert_contains "awake" "$out" "37. check → reports keep-awake status"
+
+  # 38. no sudoers rule (sudo -n fails) → session still spawns (exit 0) + one-line hint, never blocks
+  cat > "$ROOT/bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+  chmod +x "$ROOT/bin/sudo"
+  rm -f "$STATE/.keepawake-warned"
+  out=$(run_rc spawn wakedeg); rc="${out##*$'\n'}"; body="${out%$'\n'*}"
+  assert_eq 0 "$rc" "38. keep-awake with no sudo rule → spawn still succeeds (never blocks)"
+  assert_contains "keep-awake" "$body" "38. no sudo rule → prints a one-line enable hint"
+  wa_sp wakedeg
+  cat > "$ROOT/bin/sudo" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >> "$ROOT/sudo.cap"
+exit 0
+EOF
+  chmod +x "$ROOT/bin/sudo"; rm -f "$STATE/.keepawake-warned"
+else
+  ok "33–38. keep-awake tests skipped (non-Darwin: feature is a documented no-op)"
+fi
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"

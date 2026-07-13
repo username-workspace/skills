@@ -28,6 +28,34 @@ if   [ -x "$CLAUDE_BIN" ];               then CLAUDE="$CLAUDE_BIN"
 elif command -v claude >/dev/null 2>&1;  then CLAUDE="claude"
 else CLAUDE=""; fi
 
+# Keep the Mac awake — INCLUDING lid closed — while a spawned session is live, so Remote Control stays
+# reachable. Lid-close sleep ignores caffeinate/IOKit assertions; the only scriptable lever is
+# `pmset disablesleep`, which needs root — granted once via a narrow NOPASSWD sudoers rule (see SKILL.md).
+# Gated on AC power (never fights the battery) and on CRS_KEEPAWAKE (default on). If the sudoers rule is
+# absent it degrades to a one-line hint and never blocks the session. macOS only.
+KEEPAWAKE_SUDOERS="/etc/sudoers.d/claude-remote-spawn"
+on_ac(){ pmset -g batt 2>/dev/null | grep -q "AC Power"; }
+any_session_alive(){
+  local s n; shopt -s nullglob
+  for s in "$STATE_DIR"/*.spawn; do n="$(basename "$s" .spawn)"; session_alive "$n" && return 0; done
+  return 1
+}
+keepawake_apply(){                                   # $1 = desired SleepDisabled value (0|1)
+  [ "$(uname -s)" = Darwin ] || return 0
+  [ "${CRS_KEEPAWAKE:-1}" = 0 ] && return 0
+  sudo -n /usr/bin/pmset disablesleep "$1" 2>/dev/null && return 0
+  local warned="$STATE_DIR/.keepawake-warned"
+  [ -e "$warned" ] || { : >"$warned"
+    echo "! keep-awake: can't toggle sleep (no sudo rule) — sessions still run, but the Mac may sleep lid-closed and drop them. Enable once:" >&2
+    echo "    echo '$USER ALL=(root) NOPASSWD: /usr/bin/pmset disablesleep 0, /usr/bin/pmset disablesleep 1' | sudo tee $KEEPAWAKE_SUDOERS >/dev/null && sudo chmod 440 $KEEPAWAKE_SUDOERS" >&2
+    echo "    (or CRS_KEEPAWAKE=0 to silence)" >&2 ; }
+  return 0
+}
+# after spawn/resume/open: hold sleep off if on AC (a session now exists); stay off the battery.
+keepawake_hold(){ on_ac && keepawake_apply 1 || keepawake_apply 0; }
+# after stop: keep it off only while a live session remains AND we're on AC; else release.
+keepawake_sync(){ { any_session_alive && on_ac; } && keepawake_apply 1 || keepawake_apply 0; }
+
 # Feeds claude's stdin: keeps it open (tail), and auto-answers the "resume from summary?" startup
 # prompt so an unattended session never hangs. Only acts if the prompt actually appears (a normal
 # spawn is unaffected). "2" = resume the full session as-is, preserving context.
@@ -127,7 +155,8 @@ exit 2; }
 case "${1:-}" in
   spawn|open|resume|list|stop|check|close-tab) cmd="$1"; shift ;;
   -h|--help)                                   cmd="$1"; shift ;;
-  *)                                           cmd="open" ;;
+  '')                                          cmd="open" ;;
+  *)                                           die "unknown subcommand: $1 (see --help)" ;;
 esac
 case "$cmd" in
   spawn)
@@ -152,6 +181,7 @@ case "$cmd" in
     prompt_args=(); [ -n "$prompt" ] && prompt_args=("$prompt")
     launch_session "$name" "$cwd" -n "$name" ${model_args[@]+"${model_args[@]}"} ${prompt_args[@]+"${prompt_args[@]}"}
     [ -n "$model" ] && echo "model=$model" >>"$STATE_DIR/$name.spawn"
+    keepawake_hold
     echo "$name"
     echo "spawned '$name'${model:+ (model: $model)} in $cwd — visible in Claude Code Remote Control (phone/desktop) + 'claude agents'. (cwd must be TRUSTED.)" >&2
     ;;
@@ -200,6 +230,7 @@ case "$cmd" in
     esac
     printf 'name=%s\ncwd=%s\nstarted=%s\nmode=window\n' "$name" "$cwd" "$(date -u +%FT%TZ)" >"$STATE_DIR/$name.spawn"
     [ -n "$model" ] && echo "model=$model" >>"$STATE_DIR/$name.spawn"
+    keepawake_hold
     echo "$name"
     echo "opened '$name'${model:+ (model: $model)} in a new terminal tab (cwd: $cwd) — live & Remote-Control-drivable while the tab stays open; 'stop $name' or closing the tab ends it (the tab then closes itself). (cwd must be TRUSTED.)" >&2
     ;;
@@ -235,6 +266,7 @@ case "$cmd" in
     launch_session "$name" "$cwd" --resume "$id" -n "$display" $fork ${model_args[@]+"${model_args[@]}"}
     { echo "resumed=$id"; echo "title=$display"; [ -n "$model" ] && echo "model=$model"; } >>"$STATE_DIR/$name.spawn"
     mode=$([ -n "$fork" ] && echo "new forked id" || echo "in-place, same id")
+    keepawake_hold
     echo "$name"
     echo "resumed $id as '$display' (handle: $name) in $cwd — Remote Control + 'claude agents' ($mode)." >&2
     ;;
@@ -263,6 +295,7 @@ case "$cmd" in
     # trailing space anchors the name (launch always passes args after it) so 'alpha' ≠ 'alphabet'
     pkill -f "remote-control $name " 2>/dev/null || true
     rm -f "$STATE_DIR/$name.spawn" "$STATE_DIR/$name.log" "$STATE_DIR/$name.cmd"
+    keepawake_sync
     echo "stopped $name"
     ;;
   check)
@@ -276,6 +309,16 @@ case "$cmd" in
       echo "remote : remoteControlAtStartup=true (every session is Remote-Control-visible)"
     else
       echo "remote : remoteControlAtStartup off — spawn still forces --remote-control <name>"
+    fi
+    if [ "$(uname -s)" = Darwin ]; then
+      if [ "${CRS_KEEPAWAKE:-1}" = 0 ]; then ka="off (CRS_KEEPAWAKE=0)"
+      else
+        rule="$([ -e "$KEEPAWAKE_SUDOERS" ] && echo "sudoers rule present" || echo "NO sudoers rule — run the one-time setup in SKILL.md")"
+        pwr="$(on_ac && echo AC || echo battery)"
+        cur="$(pmset -g 2>/dev/null | awk '/SleepDisabled/{print $2}')"; cur="${cur:-0}"
+        ka="on — $rule; power=$pwr; SleepDisabled=$cur (only held while a session is live + on AC)"
+      fi
+      echo "awake  : $ka"
     fi
     shopt -s nullglob; spawns=("$STATE_DIR"/*.spawn)
     echo "spawns : ${#spawns[@]} session(s)"

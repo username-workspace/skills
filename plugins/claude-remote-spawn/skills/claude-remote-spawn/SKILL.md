@@ -97,6 +97,24 @@ your phone:
   *"reopen the session about the payload-hash work, remotely"* → `find-session` → id →
   `driver.sh resume <id>`.
 
+## Keeping the Mac awake (so sessions survive)
+
+A spawned session is a **local process**: if the Mac sleeps, it is frozen and Remote Control drops.
+Lid-close sleep ignores `caffeinate`/IOKit assertions — the only scriptable lever is
+`pmset disablesleep`, which needs root. So while a session is live and **on AC power**, `spawn`/`open`/
+`resume` set `disablesleep 1` (kept awake even lid-closed); `stop` releases it once no session remains.
+On battery it is never held (no bag-overheat / drain). Toggle it off entirely with `CRS_KEEPAWAKE=0`.
+
+**One-time setup** — grant the narrow, passwordless right to toggle *only* that one setting:
+
+    echo "$USER ALL=(root) NOPASSWD: /usr/bin/pmset disablesleep 0, /usr/bin/pmset disablesleep 1" \
+      | sudo tee /etc/sudoers.d/claude-remote-spawn >/dev/null && sudo chmod 440 /etc/sudoers.d/claude-remote-spawn
+
+Without it, sessions still spawn — `check` and the first spawn print a one-line hint, and the Mac may
+sleep lid-closed and drop them. `check` reports the rule, the power source, and the live `SleepDisabled`
+value. Note: unplugging mid-session does not auto-revert the hold — `stop` (or the next spawn/stop)
+re-evaluates it. macOS only; a no-op on Linux.
+
 ## Requirements / gotchas
 
 - **cwd must be a TRUSTED folder** — otherwise the session blocks on Claude Code's
@@ -113,3 +131,4 @@ your phone:
 - `CRS_SPAWN_CWD` — working dir for `spawn` (must be TRUSTED; default `$PWD`)
 - `CRS_HEADLESS_DANGEROUS` — use `--dangerously-skip-permissions` instead of the `auto` default
 - `CRS_HEADLESS_PERM_FLAGS` — exact permission-flags override (`""` = none)
+- `CRS_KEEPAWAKE` — `0` disables the keep-awake hold (default on; macOS + AC only)
