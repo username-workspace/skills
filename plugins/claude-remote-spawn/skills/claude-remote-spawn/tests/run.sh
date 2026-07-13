@@ -407,7 +407,40 @@ exit 0
 EOF
   chmod +x "$ROOT/bin/sudo"; rm -f "$STATE/.keepawake-warned"
 else
-  ok "33–38. keep-awake tests skipped (non-Darwin: feature is a documented no-op)"
+  ok "33–38. keep-awake macOS tests skipped (non-Darwin host)"
+fi
+
+# 39–40. keep-awake Linux path (systemd-inhibit) — a stubbed `uname` forces the Linux branch, and a
+# stubbed systemd-inhibit shadows any real one, so this runs on ANY host (macOS dev + Linux CI) without
+# taking a real inhibitor lock. Needs pgrep (session liveness); skipped where absent.
+if command -v pgrep >/dev/null 2>&1; then
+  LIN="$ROOT/lin"; mkdir -p "$LIN"
+  printf '#!/usr/bin/env bash\necho Linux\n' > "$LIN/uname"
+  printf '#!/usr/bin/env bash\necho "systemd-inhibit $*" >> "%s/inhibit.cap"\nexit 0\n' "$ROOT" > "$LIN/systemd-inhibit"
+  printf '#!/usr/bin/env bash\nexit ${OAP:-0}\n' > "$LIN/on_ac_power"   # 0=AC (default), 1=battery
+  chmod +x "$LIN"/uname "$LIN"/systemd-inhibit "$LIN"/on_ac_power
+  lrun(){ CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" \
+          PATH="$LIN:$PATH" OAP="${OAP:-0}" bash "$DRIVER" "$@" 2>&1; }
+
+  # 39. Linux + AC: spawn takes a systemd-inhibit hold (sleep + lid switch) and records it; stop releases it
+  : > "$ROOT/inhibit.cap"; rm -f "$STATE/.keepawake.pid" "$STATE/.keepawake-warned"
+  out=$(lrun spawn linwake)
+  for _ in $(seq 1 50); do [ -s "$ROOT/inhibit.cap" ] && break; sleep 0.1; done   # holder is detached/async
+  assert_contains "handle-lid-switch" "$(cat "$ROOT/inhibit.cap" 2>/dev/null)" "39. Linux/AC spawn → systemd-inhibit blocks sleep + lid switch"
+  assert_contains "--mode=block" "$(cat "$ROOT/inhibit.cap" 2>/dev/null)" "39. Linux → block-mode inhibitor"
+  [ -e "$STATE/.keepawake.pid" ] && ok "39. Linux → holder pid recorded" || ko "39. Linux → holder pid file missing"
+  lrun stop linwake >/dev/null 2>&1 || true
+  [ ! -e "$STATE/.keepawake.pid" ] && ok "39. Linux stop → holder released (pid file gone)" || ko "39. Linux stop → holder pid left behind"
+
+  # 40. Linux + battery: never inhibits, never records a holder (does not fight the battery)
+  : > "$ROOT/inhibit.cap"; rm -f "$STATE/.keepawake.pid"
+  out=$(OAP=1 lrun spawn linbatt)
+  for _ in $(seq 1 50); do [ -e "$STATE/linbatt.spawn" ] && break; sleep 0.1; done
+  assert_eq "" "$(cat "$ROOT/inhibit.cap" 2>/dev/null)" "40. Linux/battery spawn → does not inhibit"
+  [ ! -e "$STATE/.keepawake.pid" ] && ok "40. Linux/battery → no holder recorded" || ko "40. Linux/battery → unexpected holder"
+  OAP=1 lrun stop linbatt >/dev/null 2>&1 || true
+else
+  ok "39–40. keep-awake Linux tests skipped (pgrep unavailable)"
 fi
 
 echo
