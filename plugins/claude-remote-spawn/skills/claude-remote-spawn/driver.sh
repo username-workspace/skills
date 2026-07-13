@@ -28,30 +28,66 @@ if   [ -x "$CLAUDE_BIN" ];               then CLAUDE="$CLAUDE_BIN"
 elif command -v claude >/dev/null 2>&1;  then CLAUDE="claude"
 else CLAUDE=""; fi
 
-# Keep the Mac awake — INCLUDING lid closed — while a spawned session is live, so Remote Control stays
-# reachable. Lid-close sleep ignores caffeinate/IOKit assertions; the only scriptable lever is
-# `pmset disablesleep`, which needs root — granted once via a narrow NOPASSWD sudoers rule (see SKILL.md).
-# Gated on AC power (never fights the battery) and on CRS_KEEPAWAKE (default on). If the sudoers rule is
-# absent it degrades to a one-line hint and never blocks the session. macOS only.
+# Keep the machine awake — INCLUDING lid closed — while a spawned session is live, so Remote Control
+# stays reachable. A session is a local process: if the machine sleeps it freezes and the connection
+# drops. Lid-close sleep ignores caffeinate/IOKit assertions, so:
+#   macOS → `pmset disablesleep 1` (needs root; granted once via a narrow NOPASSWD sudoers rule, see SKILL.md).
+#   Linux → a detached `systemd-inhibit --what=sleep:idle:handle-lid-switch --mode=block` holder process.
+# Gated on AC power (never fights the battery) and on CRS_KEEPAWAKE (default on). If the mechanism is
+# unavailable it degrades to a one-line hint and never blocks the session.
 KEEPAWAKE_SUDOERS="/etc/sudoers.d/claude-remote-spawn"
-on_ac(){ pmset -g batt 2>/dev/null | grep -q "AC Power"; }
+KEEPAWAKE_PID="$STATE_DIR/.keepawake.pid"
+on_ac(){
+  case "$(uname -s)" in
+    Darwin) pmset -g batt 2>/dev/null | grep -q "AC Power" ;;
+    Linux)  command -v on_ac_power >/dev/null 2>&1 || return 0   # no battery info → treat as AC (server)
+            local st=0; on_ac_power || st=$?; [ "$st" -ne 1 ] ;; # on_ac_power: 0=AC 1=battery 255=unknown
+    *)      return 0 ;;
+  esac
+}
 any_session_alive(){
   local s n; shopt -s nullglob
   for s in "$STATE_DIR"/*.spawn; do n="$(basename "$s" .spawn)"; session_alive "$n" && return 0; done
   return 1
 }
-keepawake_apply(){                                   # $1 = desired SleepDisabled value (0|1)
-  [ "$(uname -s)" = Darwin ] || return 0
-  [ "${CRS_KEEPAWAKE:-1}" = 0 ] && return 0
-  sudo -n /usr/bin/pmset disablesleep "$1" 2>/dev/null && return 0
-  local warned="$STATE_DIR/.keepawake-warned"
-  [ -e "$warned" ] || { : >"$warned"
+keepawake_warn(){                                    # one line, once per state dir, platform-aware
+  local warned="$STATE_DIR/.keepawake-warned"; [ -e "$warned" ] && return 0; : >"$warned"
+  if [ "$(uname -s)" = Darwin ]; then
     echo "! keep-awake: can't toggle sleep (no sudo rule) — sessions still run, but the Mac may sleep lid-closed and drop them. Enable once:" >&2
     echo "    echo '$USER ALL=(root) NOPASSWD: /usr/bin/pmset disablesleep 0, /usr/bin/pmset disablesleep 1' | sudo tee $KEEPAWAKE_SUDOERS >/dev/null && sudo chmod 440 $KEEPAWAKE_SUDOERS" >&2
-    echo "    (or CRS_KEEPAWAKE=0 to silence)" >&2 ; }
+    echo "    (or CRS_KEEPAWAKE=0 to silence)" >&2
+  else
+    echo "! keep-awake: 'systemd-inhibit' not found — sessions still run, but this host may sleep and drop them. Install systemd, or CRS_KEEPAWAKE=0 to silence." >&2
+  fi
+}
+keepawake_linux(){                                   # $1 = desired hold (0|1); returns 1 only if unavailable
+  command -v systemd-inhibit >/dev/null 2>&1 || return 1
+  local pid; pid="$(cat "$KEEPAWAKE_PID" 2>/dev/null || true)"
+  if [ "$1" = 1 ]; then
+    { [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; } && return 0   # already holding
+    set -m                                                          # own process group → clean group-kill
+    ( systemd-inhibit --what=sleep:idle:handle-lid-switch --who="claude-remote-spawn" \
+        --why="remote-control session live" --mode=block sleep infinity ) >/dev/null 2>&1 &
+    local leader=$!
+    set +m
+    echo "$leader" >"$KEEPAWAKE_PID"
+  else
+    [ -n "$pid" ] && kill -- -"$pid" 2>/dev/null || true
+    rm -f "$KEEPAWAKE_PID"
+  fi
   return 0
 }
-# after spawn/resume/open: hold sleep off if on AC (a session now exists); stay off the battery.
+keepawake_apply(){                                   # $1 = desired hold (0|1)
+  [ "${CRS_KEEPAWAKE:-1}" = 0 ] && return 0
+  case "$(uname -s)" in
+    Darwin) sudo -n /usr/bin/pmset disablesleep "$1" 2>/dev/null && return 0 ;;
+    Linux)  keepawake_linux "$1" && return 0 ;;
+    *)      return 0 ;;
+  esac
+  keepawake_warn
+  return 0
+}
+# after spawn/resume/open: hold sleep off if on AC (a session now exists); never on the battery.
 keepawake_hold(){ on_ac && keepawake_apply 1 || keepawake_apply 0; }
 # after stop: keep it off only while a live session remains AND we're on AC; else release.
 keepawake_sync(){ { any_session_alive && on_ac; } && keepawake_apply 1 || keepawake_apply 0; }
@@ -310,15 +346,21 @@ case "$cmd" in
     else
       echo "remote : remoteControlAtStartup off — spawn still forces --remote-control <name>"
     fi
-    if [ "$(uname -s)" = Darwin ]; then
-      if [ "${CRS_KEEPAWAKE:-1}" = 0 ]; then ka="off (CRS_KEEPAWAKE=0)"
-      else
-        rule="$([ -e "$KEEPAWAKE_SUDOERS" ] && echo "sudoers rule present" || echo "NO sudoers rule — run the one-time setup in SKILL.md")"
-        pwr="$(on_ac && echo AC || echo battery)"
-        cur="$(pmset -g 2>/dev/null | awk '/SleepDisabled/{print $2}')"; cur="${cur:-0}"
-        ka="on — $rule; power=$pwr; SleepDisabled=$cur (only held while a session is live + on AC)"
-      fi
-      echo "awake  : $ka"
+    if [ "${CRS_KEEPAWAKE:-1}" = 0 ]; then
+      echo "awake  : off (CRS_KEEPAWAKE=0)"
+    else
+      case "$(uname -s)" in
+        Darwin)
+          rule="$([ -e "$KEEPAWAKE_SUDOERS" ] && echo "sudoers rule present" || echo "NO sudoers rule — run the one-time setup in SKILL.md")"
+          cur="$(pmset -g 2>/dev/null | awk '/SleepDisabled/{print $2}')"; cur="${cur:-0}"
+          echo "awake  : macOS — $rule; power=$(on_ac && echo AC || echo battery); SleepDisabled=$cur (held only while a session is live + on AC)" ;;
+        Linux)
+          have="$(command -v systemd-inhibit >/dev/null 2>&1 && echo "systemd-inhibit present" || echo "NO systemd-inhibit — install systemd")"
+          pid="$(cat "$KEEPAWAKE_PID" 2>/dev/null || true)"
+          held="$({ [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; } && echo "holding (pid $pid)" || echo "not held")"
+          echo "awake  : Linux — $have; power=$(on_ac && echo AC || echo battery); $held (held only while a session is live + on AC)" ;;
+        *) echo "awake  : unsupported OS — keep-awake is a no-op" ;;
+      esac
     fi
     shopt -s nullglob; spawns=("$STATE_DIR"/*.spawn)
     echo "spawns : ${#spawns[@]} session(s)"

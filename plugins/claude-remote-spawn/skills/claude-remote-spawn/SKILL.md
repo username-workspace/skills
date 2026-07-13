@@ -97,23 +97,29 @@ your phone:
   *"reopen the session about the payload-hash work, remotely"* → `find-session` → id →
   `driver.sh resume <id>`.
 
-## Keeping the Mac awake (so sessions survive)
+## Keeping the machine awake (so sessions survive)
 
-A spawned session is a **local process**: if the Mac sleeps, it is frozen and Remote Control drops.
-Lid-close sleep ignores `caffeinate`/IOKit assertions — the only scriptable lever is
-`pmset disablesleep`, which needs root. So while a session is live and **on AC power**, `spawn`/`open`/
-`resume` set `disablesleep 1` (kept awake even lid-closed); `stop` releases it once no session remains.
-On battery it is never held (no bag-overheat / drain). Toggle it off entirely with `CRS_KEEPAWAKE=0`.
+A spawned session is a **local process**: if the machine sleeps, it is frozen and Remote Control drops.
+Lid-close sleep ignores `caffeinate`/IOKit assertions, so while a session is live and **on AC power**,
+`spawn`/`open`/`resume` keep it awake (even lid-closed) and `stop` releases once no session remains. On
+battery it is never held (no overheat / drain). Toggle off entirely with `CRS_KEEPAWAKE=0`. `check`
+reports the mechanism, power source, and current hold. Unplugging mid-session doesn't auto-revert — the
+next `spawn`/`stop` re-evaluates it.
 
-**One-time setup** — grant the narrow, passwordless right to toggle *only* that one setting:
+- **macOS** — `pmset disablesleep`, which needs root. Grant the narrow, passwordless right *once*
+  (only that one setting):
 
-    echo "$USER ALL=(root) NOPASSWD: /usr/bin/pmset disablesleep 0, /usr/bin/pmset disablesleep 1" \
-      | sudo tee /etc/sudoers.d/claude-remote-spawn >/dev/null && sudo chmod 440 /etc/sudoers.d/claude-remote-spawn
+      echo "$USER ALL=(root) NOPASSWD: /usr/bin/pmset disablesleep 0, /usr/bin/pmset disablesleep 1" \
+        | sudo tee /etc/sudoers.d/claude-remote-spawn >/dev/null && sudo chmod 440 /etc/sudoers.d/claude-remote-spawn
 
-Without it, sessions still spawn — `check` and the first spawn print a one-line hint, and the Mac may
-sleep lid-closed and drop them. `check` reports the rule, the power source, and the live `SleepDisabled`
-value. Note: unplugging mid-session does not auto-revert the hold — `stop` (or the next spawn/stop)
-re-evaluates it. macOS only; a no-op on Linux.
+  Without the rule, sessions still spawn — `check` and the first spawn print a one-line hint — but the
+  Mac may sleep lid-closed and drop them.
+
+- **Linux** — a detached `systemd-inhibit --what=sleep:idle:handle-lid-switch --mode=block` holder
+  process (started on the first live session, killed on the last). No setup on a standard systemd
+  desktop; an active login session may be required by polkit to take the lid-switch lock. Power source
+  is read via `on_ac_power` (no battery → treated as AC, e.g. a server). If `systemd-inhibit` is absent,
+  sessions still spawn and a one-line hint is printed.
 
 ## Requirements / gotchas
 
@@ -131,4 +137,4 @@ re-evaluates it. macOS only; a no-op on Linux.
 - `CRS_SPAWN_CWD` — working dir for `spawn` (must be TRUSTED; default `$PWD`)
 - `CRS_HEADLESS_DANGEROUS` — use `--dangerously-skip-permissions` instead of the `auto` default
 - `CRS_HEADLESS_PERM_FLAGS` — exact permission-flags override (`""` = none)
-- `CRS_KEEPAWAKE` — `0` disables the keep-awake hold (default on; macOS + AC only)
+- `CRS_KEEPAWAKE` — `0` disables the keep-awake hold (default on; macOS `pmset` / Linux `systemd-inhibit`, AC only)
