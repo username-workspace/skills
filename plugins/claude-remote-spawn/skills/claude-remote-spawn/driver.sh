@@ -66,24 +66,69 @@ nato_name(){
   echo "claude-$(date +%H%M%S)"
 }
 
+# osascript wants the launcher path as an AppleScript string literal — escape \ and " (default paths are
+# clean, but CRS_HEADLESS_STATE could carry either).
+osa_escape(){ printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+# Open `launcher` in a NEW tab of the terminal that launched the skill. Returns 2 for a terminal we can't
+# script, 3 when osascript is absent — the caller then tells the user to run the launcher themselves.
+open_terminal_tab(){
+  local launcher="$1" esc; esc="$(osa_escape "$launcher")"
+  command -v osascript >/dev/null 2>&1 || return 3
+  case "${TERM_PROGRAM:-}" in
+    iTerm.app)
+      osascript >/dev/null 2>&1 <<OSA
+tell application "iTerm"
+  if (count of windows) = 0 then
+    create window with default profile command "$esc"
+  else
+    tell current window to create tab with default profile command "$esc"
+  end if
+  activate
+end tell
+OSA
+      ;;
+    Apple_Terminal)
+      osascript >/dev/null 2>&1 <<OSA
+tell application "Terminal"
+  activate
+  do script "$esc"
+end tell
+OSA
+      ;;
+    *) return 2 ;;
+  esac
+}
+
 usage(){ cat >&2 <<EOF
-usage: driver.sh <spawn|resume|list|stop|check> [args]
-  spawn [name] [--model M] [--prompt 'text']  launch a session; name from context, else NATO; --prompt submits an initial instruction
+usage: driver.sh [open|spawn|resume|list|stop|check] [args]   (subcommand omitted → 'open')
+  open  [name] [--model M] [--prompt 'text']  DEFAULT — launch a session in a NEW LOCAL terminal tab (iTerm/Terminal.app); ephemeral — close the tab to stop
+  spawn [name] [--model M] [--prompt 'text']  launch a DETACHED, persistent session (Remote Control + phone), survives until 'stop'
   resume <id> [name] [--in-place] [--model M]  respawn an existing session by id (forks a fresh id; --in-place=same id)
   list                     list spawned sessions (live/dead)
   stop <name>              stop a session
-  check                    health (claude, script, perms, models, remote-control, sessions)
+  check                    health (claude, script, perms, models, remote-control, terminal, sessions)
 spawn/resume run 'claude --remote-control <name> [--resume <id>]' in a PTY (script) so the session
 stays visible & drivable from your phone/desktop. --model takes any value your 'claude' accepts (an
 alias like opus/sonnet/fable, or a full id like claude-fable-5); it is passed straight to
 'claude --model' and validated there — nothing is hardcoded. To resume from a description, get the id
-with find-session, then 'resume <id>'. cwd MUST be a TRUSTED folder (default \$PWD; override CRS_SPAWN_CWD).
+with find-session, then 'resume <id>'. 'open' instead runs the session in a real LOCAL terminal tab
+(macOS: iTerm.app/Apple_Terminal via osascript) with no detach engine — so it's visible & interactive
+where you launched it, but closing the tab ends it (no phone-driving after that).
+cwd MUST be a TRUSTED folder (default \$PWD; override CRS_SPAWN_CWD).
 env: CRS_CLAUDE_BIN, CRS_HEADLESS_STATE, CRS_SPAWN_CWD,
      CRS_HEADLESS_DANGEROUS, CRS_HEADLESS_PERM_FLAGS
 EOF
 exit 2; }
 
-cmd="${1:-}"; shift || true
+# 'open' is the default subcommand: a bare invocation, or a first token that
+# isn't a known subcommand/help flag (i.e. a session name or a flag), runs
+# 'open' with the original args preserved.
+case "${1:-}" in
+  spawn|open|resume|list|stop|check|close-tab) cmd="$1"; shift ;;
+  -h|--help)                                   cmd="$1"; shift ;;
+  *)                                           cmd="open" ;;
+esac
 case "$cmd" in
   spawn)
     need_claude; need_script
@@ -109,6 +154,54 @@ case "$cmd" in
     [ -n "$model" ] && echo "model=$model" >>"$STATE_DIR/$name.spawn"
     echo "$name"
     echo "spawned '$name'${model:+ (model: $model)} in $cwd — visible in Claude Code Remote Control (phone/desktop) + 'claude agents'. (cwd must be TRUSTED.)" >&2
+    ;;
+  open)
+    need_claude
+    name=""; model=""; prompt=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --model)    [ -n "${2:-}" ] || die "--model needs a value (an alias like opus/sonnet/fable, or a full model id)"; model="$2"; shift 2 ;;
+        --model=*)  model="${1#--model=}"; shift ;;
+        --prompt)   [ -n "${2:-}" ] || die "--prompt needs a value (the initial instruction submitted to the session)"; prompt="$2"; shift 2 ;;
+        --prompt=*) prompt="${1#--prompt=}"; shift ;;
+        -*)         die "unknown flag: $1" ;;
+        *)          [ -z "$name" ] && name="$1"; shift ;;
+      esac
+    done
+    # names become file paths and AppleScript args — only ever use the slugified form
+    name="${name:+$(slugify "$name")}"
+    [ -n "$name" ] || name="$(nato_name)"
+    [ -e "$STATE_DIR/$name.spawn" ] && die "session '$name' already exists (stop it first)"
+    cwd="${CRS_SPAWN_CWD:-$PWD}"
+    launcher="$STATE_DIR/$name.cmd"
+    self="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")"
+    # the launcher is what the terminal tab runs; %q makes the claude argv injection-proof. PERM is a
+    # pre-split flag string (maybe empty) — written raw on purpose so the tab's shell re-splits it.
+    # NOT exec: the launcher must regain control when claude ends (stop/exit/crash) to close its own
+    # tab via 'close-tab', so no dead session lingers — that's the cleanup 'stop' alone can't do.
+    {
+      printf '#!/usr/bin/env bash\n'
+      printf 'cd %q || exit 1\n' "$cwd"
+      printf '%q --remote-control %q -n %q' "$CLAUDE" "$name" "$name"
+      [ -n "$model" ]  && printf ' --model %q' "$model"
+      [ -n "$prompt" ] && printf ' %q' "$prompt"
+      printf ' %s\n' "$PERM"
+      printf 'rc=$?\n'
+      printf '%q close-tab >/dev/null 2>&1 || true\n' "$self"
+      printf 'exit "$rc"\n'
+    } >"$launcher"
+    chmod +x "$launcher"
+    rc=0; open_terminal_tab "$launcher" || rc=$?
+    case "$rc" in
+      0) ;;
+      2) rm -f "$STATE_DIR/$name.spawn"; die "open: terminal '${TERM_PROGRAM:-unknown}' isn't auto-openable — run it yourself in any terminal: $launcher" ;;
+      3) rm -f "$STATE_DIR/$name.spawn"; die "open: osascript not found (macOS-only auto-open) — run it yourself in any terminal: $launcher" ;;
+      *) rm -f "$STATE_DIR/$name.spawn"; die "open: could not open a terminal tab (osascript exit $rc) — run it yourself: $launcher" ;;
+    esac
+    printf 'name=%s\ncwd=%s\nstarted=%s\nmode=window\n' "$name" "$cwd" "$(date -u +%FT%TZ)" >"$STATE_DIR/$name.spawn"
+    [ -n "$model" ] && echo "model=$model" >>"$STATE_DIR/$name.spawn"
+    echo "$name"
+    echo "opened '$name'${model:+ (model: $model)} in a new terminal tab (cwd: $cwd) — live & Remote-Control-drivable while the tab stays open; 'stop $name' or closing the tab ends it (the tab then closes itself). (cwd must be TRUSTED.)" >&2
     ;;
   resume)
     need_claude; need_script
@@ -153,7 +246,8 @@ case "$cmd" in
       state="dead"; if session_alive "$n"; then state="live"; fi
       ri="$(spawn_get "$n" resumed)"; ri="${ri:+  resumed=$ri}"
       mi="$(spawn_get "$n" model)"; mi="${mi:+  model=$mi}"
-      printf '%-22s %-6s started=%s  cwd=%s%s%s\n' "$n" "$state" "$(spawn_get "$n" started)" "$(spawn_get "$n" cwd)" "$ri" "$mi"
+      wi="$(spawn_get "$n" mode)"; wi="${wi:+  $wi}"
+      printf '%-22s %-6s started=%s  cwd=%s%s%s%s\n' "$n" "$state" "$(spawn_get "$n" started)" "$(spawn_get "$n" cwd)" "$ri" "$mi" "$wi"
     done
     ;;
   stop)
@@ -168,7 +262,7 @@ case "$cmd" in
     fi
     # trailing space anchors the name (launch always passes args after it) so 'alpha' ≠ 'alphabet'
     pkill -f "remote-control $name " 2>/dev/null || true
-    rm -f "$STATE_DIR/$name.spawn" "$STATE_DIR/$name.log"
+    rm -f "$STATE_DIR/$name.spawn" "$STATE_DIR/$name.log" "$STATE_DIR/$name.cmd"
     echo "stopped $name"
     ;;
   check)
@@ -177,6 +271,7 @@ case "$cmd" in
     echo "perms  : $PERM"
     mh="$({ "$CLAUDE" --help 2>/dev/null | grep -aA3 -- '--model <model>' | tr '\n' ' ' | tr -s ' ' | sed 's/.*--model <model> *//'; } 2>/dev/null || true)"
     echo "model  : 'spawn --model <alias|id>' — passed to 'claude --model', validated there. ${mh:-run 'claude --help' for current aliases}"
+    echo "term   : TERM_PROGRAM=${TERM_PROGRAM:-<unset>} — 'open' auto-opens a tab in iTerm.app/Apple_Terminal via osascript ($(command -v osascript >/dev/null 2>&1 && echo present || echo MISSING))"
     if grep -q '"remoteControlAtStartup": *true' "$HOME/.claude/settings.json" 2>/dev/null; then
       echo "remote : remoteControlAtStartup=true (every session is Remote-Control-visible)"
     else
@@ -184,6 +279,40 @@ case "$cmd" in
     fi
     shopt -s nullglob; spawns=("$STATE_DIR"/*.spawn)
     echo "spawns : ${#spawns[@]} session(s)"
+    ;;
+  close-tab)
+    # called by an 'open' launcher when its session ends — closes the launcher's OWN tab (read from the
+    # tab's env), so a stopped/exited window session leaves no dead tab. Best-effort, always exits 0.
+    command -v osascript >/dev/null 2>&1 || exit 0
+    case "${TERM_PROGRAM:-}" in
+      iTerm.app)
+        guid="${ITERM_SESSION_ID:-}"; guid="${guid##*:}"; [ -n "$guid" ] || exit 0
+        osascript >/dev/null 2>&1 <<OSA || true
+tell application "iTerm"
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with s in sessions of t
+        if id of s is "$guid" then close s
+      end repeat
+    end repeat
+  end repeat
+end tell
+OSA
+        ;;
+      Apple_Terminal)
+        mytty="$(tty 2>/dev/null)"; [ -n "$mytty" ] && [ "$mytty" != "not a tty" ] || exit 0
+        osascript >/dev/null 2>&1 <<OSA || true
+tell application "Terminal"
+  repeat with w in windows
+    repeat with t in tabs of w
+      if tty of t is "$mytty" then close w saving no
+    end repeat
+  end repeat
+end tell
+OSA
+        ;;
+    esac
+    exit 0
     ;;
   ""|-h|--help) usage ;;
   *) die "unknown subcommand: $cmd (see --help)";;
