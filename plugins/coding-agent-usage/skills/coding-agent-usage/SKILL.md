@@ -27,6 +27,11 @@ Use the cross-provider dashboard by default. It is the only report that covers e
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/coding-agent-usage/scripts/collect-multiprovider.py" > /tmp/cc-multi-data.json
 ```
 
+The collector automatically discovers every valid Claude profile directory (`/Users/*/.claude` on
+macOS; `/home/*/.claude` on Linux) and passes the complete list to `ccusage` via
+`CLAUDE_CONFIG_DIR`. Separate OS accounts are aggregated automatically; the dashboard exposes the
+number of discovered Claude profiles. Do not merge or copy transcripts manually.
+
 Build from `assets/report-multiprovider-template.html`, inject
 `<script>window.MDATA = <json>;</script>` immediately before `</head>`, and write the HTML file
 using the standard timestamped output name. The report must display **every** row in `MDATA.by_model`;

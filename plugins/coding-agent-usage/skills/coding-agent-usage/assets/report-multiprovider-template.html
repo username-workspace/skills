@@ -138,7 +138,7 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 const colorOf = (p) => (D.providers.find(x => x.name === p) || {}).color || '#b3a78f';
 
 document.getElementById('subtitle').textContent =
-  `${D.metadata.first_day} → ${D.metadata.last_day} · ${D.metadata.active_days} active days · source: ${D.metadata.source}`;
+  `${D.metadata.first_day} → ${D.metadata.last_day} · ${D.metadata.active_days} active days · ${D.metadata.claude_accounts.length} Claude profile${D.metadata.claude_accounts.length === 1 ? '' : 's'} · source: ${D.metadata.source}`;
 
 const oai = D.providers.find(p => p.name === 'OpenAI') || {cost:0};
 const kpis = [

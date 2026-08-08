@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, os, sys, subprocess, math
+import json, os, sys, subprocess, math, glob
 from collections import defaultdict
 from datetime import date
 
@@ -44,22 +44,51 @@ def color_of(name):
     return PROVIDERS.get(name, ("#b3a78f",))[0]
 
 
+def discover_claude_config_dirs():
+    """Find every local Claude profile, including multiple macOS user accounts."""
+    candidates = []
+    configured = os.environ.get("CLAUDE_CONFIG_DIR")
+    if configured:
+        candidates.extend(configured.split(os.pathsep))
+
+    # Claude Code keeps each macOS account's local history in /Users/<account>/.claude.
+    # Keep the Linux equivalent so the same skill remains usable off macOS.
+    roots = ["/Users"] if sys.platform == "darwin" else ["/home"]
+    for root in roots:
+        candidates.extend(glob.glob(os.path.join(root, "*", ".claude")))
+    candidates.append(os.path.expanduser("~/.claude"))
+
+    seen, valid = set(), []
+    for path in candidates:
+        real = os.path.realpath(os.path.expanduser(path))
+        if real not in seen and os.path.isdir(os.path.join(real, "projects")):
+            seen.add(real)
+            valid.append(real)
+    return valid
+
+
 def load_daily(argv):
     if len(argv) > 1 and argv[1] and os.path.isfile(os.path.expanduser(argv[1])):
         with open(os.path.expanduser(argv[1])) as f:
-            return json.load(f)
+            return json.load(f), discover_claude_config_dirs()
+    claude_dirs = discover_claude_config_dirs()
+    env = os.environ.copy()
+    if claude_dirs:
+        # ccusage accepts a path-separated list and aggregates every matching
+        # Claude config directory. This is what makes two macOS accounts work.
+        env["CLAUDE_CONFIG_DIR"] = os.pathsep.join(claude_dirs)
     out = subprocess.run(
         ["npx", "-y", f"ccusage@{CCUSAGE_VERSION}", "daily", "--json"],
-        capture_output=True, text=True, timeout=180,
+        capture_output=True, text=True, timeout=180, env=env,
     )
     if out.returncode != 0 or not out.stdout.strip():
         sys.stderr.write("ccusage failed: " + (out.stderr or "no output") + "\n")
         sys.exit(2)
-    return json.loads(out.stdout)
+    return json.loads(out.stdout), claude_dirs
 
 
 def main():
-    d = load_daily(sys.argv)
+    d, claude_dirs = load_daily(sys.argv)
     rows = d.get("daily", [])
     if not rows:
         sys.stderr.write("no daily rows from ccusage\n")
@@ -156,6 +185,7 @@ def main():
             "last_day": max(days) if days else None,
             "active_days": len(set(days)),
             "tool": "coding-agent-usage 1.0 / multiprovider",
+            "claude_accounts": [os.path.basename(os.path.dirname(path)) for path in claude_dirs],
         },
         "totals": {
             "cost": round(total, 2),
