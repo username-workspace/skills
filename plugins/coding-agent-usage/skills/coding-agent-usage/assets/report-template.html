@@ -173,7 +173,7 @@ const compact = (n) => n >= 1e9 ? (n/1e9).toFixed(1)+'B' : n >= 1e6 ? (n/1e6).to
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 document.getElementById('subtitle').textContent =
-  `${D.metadata.first_day} → ${D.metadata.last_day} · ${D.metadata.active_days} active days · ${D.metadata.files.toLocaleString('en-US')} sessions parsed · scope ${D.metadata.scope}`;
+  `${D.metadata.first_day} → ${D.metadata.last_day} · ${D.metadata.active_days} active days · ${D.metadata.files.toLocaleString('en-US')} sessions parsed · ${D.metadata.claude_profiles} Claude profile${D.metadata.claude_profiles === 1 ? '' : 's'} · scope ${D.metadata.scope}`;
 
 const topModel = (D.by_model[0] || {}).model || '—';
 const kpis = [

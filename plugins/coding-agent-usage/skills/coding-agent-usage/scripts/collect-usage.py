@@ -13,13 +13,29 @@ def load_benchmarks():
     return benchmark.load(BENCH_PATH)
 
 
-def projects_dir(argv):
+def projects_dirs(argv):
     if len(argv) > 1 and argv[1]:
         base = os.path.expanduser(argv[1])
-    else:
-        base = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude"))
-    cand = os.path.join(base, "projects")
-    return cand if os.path.isdir(cand) else base
+        cand = os.path.join(base, "projects")
+        return [cand if os.path.isdir(cand) else base]
+
+    candidates = []
+    configured = os.environ.get("CLAUDE_CONFIG_DIR")
+    if configured:
+        candidates.extend(configured.split(os.pathsep))
+    roots = ["/Users"] if sys.platform == "darwin" else ["/home"]
+    for root in roots:
+        candidates.extend(glob.glob(os.path.join(root, "*", ".claude")))
+    candidates.append(os.path.expanduser("~/.claude"))
+
+    seen, projects = set(), []
+    for base in candidates:
+        real = os.path.realpath(os.path.expanduser(base))
+        project_dir = os.path.join(real, "projects")
+        if real not in seen and os.path.isdir(project_dir):
+            seen.add(real)
+            projects.append(project_dir)
+    return projects
 
 
 # minor capped at 2 digits so a date suffix (opus-4-20250514) never reads as a version
@@ -110,8 +126,8 @@ def band(p):
 def main():
     bench = load_benchmarks()
     pricing = bench["pricing_usd_per_mtok"]
-    root = projects_dir(sys.argv)
-    files = glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True)
+    roots = projects_dirs(sys.argv)
+    files = [fp for root in roots for fp in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True)]
 
     tok = Counter()
     total_cost = 0.0
@@ -324,7 +340,8 @@ def main():
     out = {
         "metadata": {
             "tool": "coding-agent-usage 1.0",
-            "scope": root,
+            "scope": ", ".join(os.path.basename(os.path.dirname(os.path.dirname(root))) for root in roots) or "(none)",
+            "claude_profiles": len(roots),
             "files": len(files),
             "first_day": first_dt.date().isoformat() if first_dt else None,
             "last_day": last_dt.date().isoformat() if last_dt else None,

@@ -18,13 +18,13 @@ Turn your local Claude Code transcripts into a usage diagnosis: **what you spend
 where you sit** versus the average developer — as an interactive HTML dashboard in the same editorial
 "blueprint" language as `delivery-metrics`.
 
-## Default workflow — all coding agents
+## Default workflow — Claude Code
 
-Use the cross-provider dashboard by default. It is the only report that covers every model that
-`ccusage` detects, including Claude Code, Codex and Gemini CLI:
+Use the Claude Code diagnosis by default. It keeps the deeper project, cache, thinking and
+subagent analysis:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/coding-agent-usage/scripts/collect-multiprovider.py" > /tmp/cc-multi-data.json
+python3 "${CLAUDE_PLUGIN_ROOT}/skills/coding-agent-usage/scripts/collect-usage.py" > /tmp/cc-diag-data.json
 ```
 
 The collector automatically discovers every valid Claude profile directory (`/Users/*/.claude` on
@@ -32,19 +32,19 @@ macOS; `/home/*/.claude` on Linux) and passes the complete list to `ccusage` via
 `CLAUDE_CONFIG_DIR`. Separate OS accounts are aggregated automatically; the dashboard exposes the
 number of discovered Claude profiles. Do not merge or copy transcripts manually.
 
-Build from `assets/report-multiprovider-template.html`, inject
-`<script>window.MDATA = <json>;</script>` immediately before `</head>`, and write the HTML file
-using the standard timestamped output name. The report must display **every** row in `MDATA.by_model`;
-do not truncate or describe the model table as “top models”.
+Build from `assets/report-template.html`, inject `<script>window.DATA = <json>;</script>` immediately
+before `</head>`, and write the HTML file using the standard timestamped output name. The report must
+display every observed raw model row; do not filter models by a fixed allow-list.
 
-## Claude Code drill-down
+## Claude Code collection details
 
 ### 1. Collect data
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/coding-agent-usage/scripts/collect-usage.py" [CLAUDE_DIR] > /tmp/cc-diag-data.json
 ```
-`[CLAUDE_DIR]` is optional — defaults to `$CLAUDE_CONFIG_DIR` or `~/.claude` (the script appends
-`/projects`). One pass over every `*.jsonl`, no network. Token/cost are **deduplicated by
+`[CLAUDE_DIR]` is optional. Without it, the collector discovers every valid Claude profile directory
+(`/Users/*/.claude` on macOS; `/home/*/.claude` on Linux) and scans each `projects/` directory.
+One pass over every `*.jsonl`, no network. Token/cost are **deduplicated by
 `message.id`** (Claude Code writes one transcript line per content block, each replaying the same
 `usage`) and replayed lines are dropped by `uuid`; tool calls are counted per `tool_use` block. Cost
 is computed locally from token counts at Anthropic list prices (see `assets/benchmarks.json`). The
@@ -65,9 +65,9 @@ Concise markdown: headline (cost, cost/active-day, percentile band), model mix, 
 (top projects), engagement signals (cache hit, thinking %, subagent %, tools/turn), and the
 benchmark read with caveats below.
 
-## Multi-provider details
+## Multi-provider mode (optional)
 
-The default cross-agent view uses `ccusage` as the authoritative per-token source:
+For a cross-agent view, use `ccusage` as the authoritative per-token source:
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/skills/coding-agent-usage/scripts/collect-multiprovider.py" [ccusage-daily.json] > /tmp/cc-multi-data.json
 ```
