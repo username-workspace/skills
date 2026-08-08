@@ -169,7 +169,9 @@ def main():
             "months": months_sorted,
             "cost": {p["name"]: [round(monthly[m].get(p["name"], 0), 2) for m in months_sorted] for p in providers},
         },
-        "by_model": all_models[:14],
+        # Keep the report exhaustive: model history is precisely the data this
+        # cross-provider view exists to expose.  The HTML table is scrollable.
+        "by_model": all_models,
     }
     json.dump(out, sys.stdout, default=str)
 

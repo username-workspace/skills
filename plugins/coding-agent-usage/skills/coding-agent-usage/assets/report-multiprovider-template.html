@@ -123,7 +123,7 @@ tr:last-child td { border-bottom: none; }
     <table><thead><tr><th>Provider</th><th class="right">Spend</th><th class="right">Share</th><th class="right">Tokens</th></tr></thead><tbody id="provBody"></tbody></table>
   </div>
   <div class="card full">
-    <h2>Top models across providers</h2>
+    <h2>Models across providers <span id="modelCount" class="muted"></span></h2>
     <table><thead><tr><th>Model</th><th>Provider</th><th class="right">Spend</th><th class="right">Share</th></tr></thead><tbody id="modelBody"></tbody></table>
     <p class="fineprint" id="note"></p>
   </div>
@@ -229,6 +229,7 @@ document.getElementById('provBody').innerHTML = D.providers.map(p => `
     <td class="right"><strong>${usd(p.cost)}</strong></td><td class="right">${p.share_pct}%</td><td class="right">${compact(p.tokens)}</td></tr>`).join('');
 
 const maxC = Math.max(...D.by_model.map(m => m.cost), 1);
+document.getElementById('modelCount').textContent = `(${D.by_model.length})`;
 document.getElementById('modelBody').innerHTML = D.by_model.map(m => `
   <tr><td><div class="name-cell"><span class="dot" style="background:${m.color}"></span>${m.model}</div></td>
     <td style="color:var(--ink-faint)">${m.provider}</td>
