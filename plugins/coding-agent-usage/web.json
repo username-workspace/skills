@@ -1,11 +1,12 @@
 {
   "category": "FinOps",
   "tagline": "See your AI coding-agent usage — and where you rank against other developers.",
-  "summary": "Parses your local Claude Code transcripts (~/.claude/projects) into an interactive HTML dashboard: API-equivalent cost, tokens, sessions, model mix, tool distribution, cache efficiency, thinking and subagent rates, per-project and per-week breakdowns — placed on a log-scale percentile gauge against Anthropic's published per-developer cost figures (fetched live, cached 24h). Adds a multi-provider view of total spend across Claude Code, Codex and Gemini via ccusage. Cost reconciles to within ~1% of ccusage; no account access.",
+  "summary": "Parses every local Claude Code profile into an interactive HTML dashboard: API-equivalent cost, tokens, sessions, every observed model, tool distribution, cache efficiency, thinking and subagent rates, per-project and per-week breakdowns — placed on a log-scale percentile gauge against Anthropic's published per-developer cost figures (fetched live, cached 24h). Automatically aggregates multiple macOS or Linux Claude profiles. An optional multi-provider view adds Codex and Gemini via ccusage.",
   "capabilities": [
     "Percentile placement on a log-scale $/active-day gauge vs Anthropic's published cost benchmark",
     "Live, 24h-cached benchmark with lognormal refit — falls back to a committed seed offline",
-    "Multi-provider spend view: Claude Code + Codex + Gemini, attributed by model via ccusage",
+    "Discovers and aggregates every local Claude profile automatically — /Users/*/.claude on macOS, /home/*/.claude on Linux",
+    "Every observed model is displayed as a raw model row; optional multi-provider spend view adds Codex and Gemini via ccusage",
     "Accurate local cost: dedupes tokens by message.id, version-aware pricing (Opus 4.5+ tier)"
   ],
   "commands": ["collect-usage", "collect-multiprovider"],
