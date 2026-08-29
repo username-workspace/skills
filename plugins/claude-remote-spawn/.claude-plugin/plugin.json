@@ -1,6 +1,6 @@
 {
   "name": "claude-remote-spawn",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Spawn or resume a persistent, remote-controllable Claude Code session you can drive from your phone or desktop (PTY-backed, survives detached), or open one in a new local terminal tab (macOS) to watch it live where you launched it. Terminal-agnostic, cross-platform.",
   "author": {
     "name": "Username",

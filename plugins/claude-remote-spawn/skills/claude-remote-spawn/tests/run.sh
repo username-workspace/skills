@@ -52,12 +52,15 @@ assert_nonzero(){ [ "$1" -ne 0 ] && ok "$2" || ko "$2 — expected nonzero exit,
 STATE="$ROOT/headless"; mkdir -p "$STATE"
 PROJECTS="$ROOT/projects"; mkdir -p "$PROJECTS"
 
-run(){ CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" \
+# CRS_CLAUDE_CONFIG points trust pre-approval at a throwaway config — the suite never touches ~/.claude.json
+CONFIG="$ROOT/claude.json"
+printf '{"projects": {"%s": {"hasTrustDialogAccepted": true}}}\n' "$(pwd -P)" > "$CONFIG"   # runner cwd trusted; 41–45 exercise the pre-approval
+run(){ CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" \
        bash "$DRIVER" "$@" 2>&1; }
-run_rc(){ CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" \
+run_rc(){ CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" \
           bash "$DRIVER" "$@" 2>&1; echo "$?"; }
 # 'open' reads TERM_PROGRAM to pick the terminal — default iTerm.app, override via $TP
-open_run(){    CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" \
+open_run(){    CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" \
                TERM_PROGRAM="${TP:-iTerm.app}" bash "$DRIVER" "$@" 2>&1; }
 open_run_rc(){ open_run "$@"; echo "$?"; }
 
@@ -380,7 +383,7 @@ if [ "$(uname -s)" = Darwin ]; then
 
   # 36. CRS_KEEPAWAKE=0 → keep-awake fully disabled: NO sudo call at all
   : > "$ROOT/sudo.cap"
-  out=$(CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" \
+  out=$(CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" \
         CRS_KEEPAWAKE=0 bash "$DRIVER" spawn wakeoff 2>&1)
   assert_eq "" "$(cat "$ROOT/sudo.cap" 2>/dev/null)" "36. CRS_KEEPAWAKE=0 → no sudo/pmset call"
   wa_sp wakeoff
@@ -419,7 +422,7 @@ if command -v pgrep >/dev/null 2>&1; then
   printf '#!/usr/bin/env bash\necho "systemd-inhibit $*" >> "%s/inhibit.cap"\nexit 0\n' "$ROOT" > "$LIN/systemd-inhibit"
   printf '#!/usr/bin/env bash\nexit ${OAP:-0}\n' > "$LIN/on_ac_power"   # 0=AC (default), 1=battery
   chmod +x "$LIN"/uname "$LIN"/systemd-inhibit "$LIN"/on_ac_power
-  lrun(){ CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" \
+  lrun(){ CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" \
           PATH="$LIN:$PATH" OAP="${OAP:-0}" bash "$DRIVER" "$@" 2>&1; }
 
   # 39. Linux + AC: spawn takes a systemd-inhibit hold (sleep + lid switch) and records it; stop releases it
@@ -442,6 +445,47 @@ if command -v pgrep >/dev/null 2>&1; then
 else
   ok "39–40. keep-awake Linux tests skipped (pgrep unavailable)"
 fi
+
+# 41–44. workspace trust — spawn/open/resume pre-approve the cwd in the claude config, so a session
+# never parks invisible on Claude Code's trust dialog. The physical path is the key: $ROOT lives under
+# a symlinked temp dir on macOS, which is exactly the case the normalization must survive.
+TRUST_CWD="$(cd "$ROOT" && pwd -P)"
+
+# 41. untrusted cwd → open flips hasTrustDialogAccepted to true, keeps every other key, reports it
+printf '{"numStartups": 7, "projects": {"%s": {"allowedTools": ["Bash"], "hasTrustDialogAccepted": false}}}\n' "$TRUST_CWD" > "$CONFIG"
+out=$(cd "$ROOT" && open_run open trustopen)
+assert_contains "trust: pre-approved $TRUST_CWD" "$out" "41. open on an untrusted cwd → reports the pre-approval (physical path)"
+assert_contains '"hasTrustDialogAccepted": true' "$(cat "$CONFIG")" "41. open → hasTrustDialogAccepted flipped to true"
+assert_contains '"numStartups": 7' "$(cat "$CONFIG")" "41. open → other top-level config keys preserved"
+assert_contains '"allowedTools"' "$(cat "$CONFIG")" "41. open → other project keys preserved"
+assert_absent '"hasTrustDialogAccepted": false' "$(cat "$CONFIG")" "41. open → no stale false left behind"
+run stop trustopen >/dev/null 2>&1 || true
+
+# 42. already trusted → config untouched (byte-identical), nothing reported
+cp "$CONFIG" "$ROOT/claude.before"
+out=$(cd "$ROOT" && run spawn trustsame)
+assert_absent "trust: pre-approved" "$out" "42. spawn on a trusted cwd → silent"
+cmp -s "$CONFIG" "$ROOT/claude.before" && ok "42. spawn on a trusted cwd → config byte-identical" || ko "42. spawn on a trusted cwd → config rewritten"
+run stop trustsame >/dev/null 2>&1 || true
+
+# 43. no config file yet → spawn still succeeds and creates the trusted entry
+rm -f "$CONFIG"
+out=$(cd "$ROOT" && run_rc spawn trustnew); rc="${out##*$'\n'}"
+assert_eq 0 "$rc" "43. missing config → spawn still succeeds"
+assert_contains "\"$TRUST_CWD\"" "$(cat "$CONFIG" 2>/dev/null)" "43. missing config → trusted entry created"
+run stop trustnew >/dev/null 2>&1 || true
+
+# 44. resume pre-approves the transcript's cwd too
+mkdir -p "$PROJECTS/p-trust"
+printf '{"cwd":"%s","aiTitle":"trust resume"}\n' "$TRUST_CWD" > "$PROJECTS/p-trust/trust-id-1.jsonl"
+printf '{"projects": {}}\n' > "$CONFIG"
+out=$(run resume trust-id-1)
+assert_contains "trust: pre-approved $TRUST_CWD" "$out" "44. resume → pre-approves the transcript cwd"
+run stop trust-resume >/dev/null 2>&1 || true
+
+# 45. check reports the trust state of the cwd
+out=$(cd "$ROOT" && run check)
+assert_contains "trust  :" "$out" "45. check → reports workspace trust"
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"

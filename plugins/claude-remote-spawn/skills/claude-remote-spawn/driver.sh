@@ -9,6 +9,7 @@ set -euo pipefail
 
 CLAUDE_BIN="${CRS_CLAUDE_BIN:-$HOME/.local/bin/claude}"
 STATE_DIR="${CRS_HEADLESS_STATE:-$HOME/.claude/headless}"
+CLAUDE_CONFIG="${CRS_CLAUDE_CONFIG:-$HOME/.claude.json}"
 if   [ -n "${CRS_HEADLESS_PERM_FLAGS+set}" ]; then PERM="$CRS_HEADLESS_PERM_FLAGS"
 elif [ -n "${CRS_HEADLESS_DANGEROUS:-}" ];    then PERM="--dangerously-skip-permissions"
 else PERM="--permission-mode auto"; fi
@@ -23,6 +24,31 @@ is_running(){ [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
 # session_stdin's immortal `tail -f /dev/null`, so it would always look "live". Trailing space anchors
 # the name (launch always passes args after it) so 'alpha' ≠ 'alphabet'.
 session_alive(){ pgrep -f "remote-control $1 " >/dev/null 2>&1; }
+
+# Claude Code parks an untrusted cwd on its workspace-trust dialog BEFORE registering with Remote
+# Control: the session runs but stays invisible. Pre-accept the folder in the claude config — the same
+# flag the dialog's "Yes" writes — keyed by the physical path, which is what claude sees as its cwd.
+is_trusted(){
+  python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("projects",{}).get(sys.argv[2],{}).get("hasTrustDialogAccepted") is True else 1)' "$CLAUDE_CONFIG" "$1" 2>/dev/null
+}
+ensure_trusted(){
+  local cwd; cwd="$(cd "$1" 2>/dev/null && pwd -P)" || return 0
+  command -v python3 >/dev/null 2>&1 || { echo "! trust: python3 not found — if the session shows the workspace-trust dialog, answer it there" >&2; return 0; }
+  is_trusted "$cwd" && return 0
+  python3 - "$CLAUDE_CONFIG" "$cwd" <<'PY' >&2 || echo "! trust: could not pre-approve $cwd in $CLAUDE_CONFIG — answer the workspace-trust dialog in the session" >&2
+import json, os, sys
+cfg, cwd = sys.argv[1], sys.argv[2]
+data = json.load(open(cfg)) if os.path.exists(cfg) else {}
+data.setdefault("projects", {}).setdefault(cwd, {})["hasTrustDialogAccepted"] = True
+tmp = cfg + ".crs-tmp"
+with open(tmp, "w") as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+if os.path.exists(cfg):
+    os.chmod(tmp, os.stat(cfg).st_mode & 0o777)
+os.replace(tmp, cfg)
+print(f"trust: pre-approved {cwd} in {cfg} (workspace-trust dialog skipped)")
+PY
+}
 
 if   [ -x "$CLAUDE_BIN" ];               then CLAUDE="$CLAUDE_BIN"
 elif command -v claude >/dev/null 2>&1;  then CLAUDE="claude"
@@ -179,8 +205,9 @@ alias like opus/sonnet/fable, or a full id like claude-fable-5); it is passed st
 with find-session, then 'resume <id>'. 'open' instead runs the session in a real LOCAL terminal tab
 (macOS: iTerm.app/Apple_Terminal via osascript) with no detach engine — so it's visible & interactive
 where you launched it, but closing the tab ends it (no phone-driving after that).
-cwd MUST be a TRUSTED folder (default \$PWD; override CRS_SPAWN_CWD).
-env: CRS_CLAUDE_BIN, CRS_HEADLESS_STATE, CRS_SPAWN_CWD,
+cwd defaults to \$PWD (override CRS_SPAWN_CWD); its workspace trust is pre-approved in the claude
+config (CRS_CLAUDE_CONFIG, default ~/.claude.json) so the session never parks invisible on the dialog.
+env: CRS_CLAUDE_BIN, CRS_HEADLESS_STATE, CRS_SPAWN_CWD, CRS_CLAUDE_CONFIG,
      CRS_HEADLESS_DANGEROUS, CRS_HEADLESS_PERM_FLAGS
 EOF
 exit 2; }
@@ -213,13 +240,14 @@ case "$cmd" in
     [ -n "$name" ] || name="$(nato_name)"
     [ -e "$STATE_DIR/$name.spawn" ] && die "session '$name' already exists (stop it first)"
     cwd="${CRS_SPAWN_CWD:-$PWD}"
+    ensure_trusted "$cwd"
     model_args=(); [ -n "$model" ] && model_args=(--model "$model")
     prompt_args=(); [ -n "$prompt" ] && prompt_args=("$prompt")
     launch_session "$name" "$cwd" -n "$name" ${model_args[@]+"${model_args[@]}"} ${prompt_args[@]+"${prompt_args[@]}"}
     [ -n "$model" ] && echo "model=$model" >>"$STATE_DIR/$name.spawn"
     keepawake_hold
     echo "$name"
-    echo "spawned '$name'${model:+ (model: $model)} in $cwd — visible in Claude Code Remote Control (phone/desktop) + 'claude agents'. (cwd must be TRUSTED.)" >&2
+    echo "spawned '$name'${model:+ (model: $model)} in $cwd — visible in Claude Code Remote Control (phone/desktop) + 'claude agents'." >&2
     ;;
   open)
     need_claude
@@ -239,6 +267,7 @@ case "$cmd" in
     [ -n "$name" ] || name="$(nato_name)"
     [ -e "$STATE_DIR/$name.spawn" ] && die "session '$name' already exists (stop it first)"
     cwd="${CRS_SPAWN_CWD:-$PWD}"
+    ensure_trusted "$cwd"
     launcher="$STATE_DIR/$name.cmd"
     self="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")"
     # the launcher is what the terminal tab runs; %q makes the claude argv injection-proof. PERM is a
@@ -268,7 +297,7 @@ case "$cmd" in
     [ -n "$model" ] && echo "model=$model" >>"$STATE_DIR/$name.spawn"
     keepawake_hold
     echo "$name"
-    echo "opened '$name'${model:+ (model: $model)} in a new terminal tab (cwd: $cwd) — live & Remote-Control-drivable while the tab stays open; 'stop $name' or closing the tab ends it (the tab then closes itself). (cwd must be TRUSTED.)" >&2
+    echo "opened '$name'${model:+ (model: $model)} in a new terminal tab (cwd: $cwd) — live & Remote-Control-drivable while the tab stays open; 'stop $name' or closing the tab ends it (the tab then closes itself)." >&2
     ;;
   resume)
     need_claude; need_script
@@ -298,6 +327,7 @@ case "$cmd" in
     rcwd="$(grep -m1 -o '"cwd":"[^"]*"' "$tx" | sed 's/^"cwd":"//; s/"$//' || true)"
     cwd="${CRS_SPAWN_CWD:-${rcwd:-$PWD}}"
     [ -d "$cwd" ] || die "session cwd '$cwd' not found (override with CRS_SPAWN_CWD)"
+    ensure_trusted "$cwd"
     model_args=(); [ -n "$model" ] && model_args=(--model "$model")
     launch_session "$name" "$cwd" --resume "$id" -n "$display" $fork ${model_args[@]+"${model_args[@]}"}
     { echo "resumed=$id"; echo "title=$display"; [ -n "$model" ] && echo "model=$model"; } >>"$STATE_DIR/$name.spawn"
@@ -346,6 +376,9 @@ case "$cmd" in
     else
       echo "remote : remoteControlAtStartup off — spawn still forces --remote-control <name>"
     fi
+    tc="${CRS_SPAWN_CWD:-$PWD}"; tp="$(cd "$tc" 2>/dev/null && pwd -P || echo "$tc")"
+    if is_trusted "$tp"; then echo "trust  : $tp trusted in $CLAUDE_CONFIG"
+    else echo "trust  : $tp NOT yet trusted — spawn/open/resume pre-approve it in $CLAUDE_CONFIG ($(command -v python3 >/dev/null 2>&1 && echo python3 present || echo 'python3 MISSING: answer the dialog in the session'))"; fi
     if [ "${CRS_KEEPAWAKE:-1}" = 0 ]; then
       echo "awake  : off (CRS_KEEPAWAKE=0)"
     else
