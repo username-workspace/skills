@@ -123,9 +123,12 @@ next `spawn`/`stop` re-evaluates it.
 
 ## Requirements / gotchas
 
-- **cwd must be a TRUSTED folder** — otherwise the session blocks on Claude Code's
-  workspace-trust dialog and never registers (stays invisible). Runs in `$PWD`; override
-  with `CRS_SPAWN_CWD`.
+- **Workspace trust is pre-approved.** Claude Code parks an untrusted folder on its workspace-trust
+  dialog *before* registering with Remote Control — the session runs but stays invisible. So
+  `spawn`/`open`/`resume` first mark the cwd trusted in the claude config (`~/.claude.json`, override
+  `CRS_CLAUDE_CONFIG`): the same `hasTrustDialogAccepted` flag the dialog's "Yes" writes, keyed by the
+  physical path. Needs `python3`; without it a one-line hint is printed and the dialog has to be
+  answered in the session. Runs in `$PWD`; override with `CRS_SPAWN_CWD`.
 - `spawn`/`resume` need `script(1)` (present on macOS + Linux); `open` needs `osascript` (macOS) to
   open the tab.
 - State lives in `~/.claude/headless/<name>.{spawn,log}` (plus `<name>.cmd`, the launcher, for `open`).
@@ -134,7 +137,8 @@ next `spawn`/`stop` re-evaluates it.
 
 - `CRS_CLAUDE_BIN` — path to `claude` (default `~/.local/bin/claude`)
 - `CRS_HEADLESS_STATE` — state dir (default `~/.claude/headless`)
-- `CRS_SPAWN_CWD` — working dir for `spawn` (must be TRUSTED; default `$PWD`)
+- `CRS_SPAWN_CWD` — working dir for `spawn`/`open` (default `$PWD`)
+- `CRS_CLAUDE_CONFIG` — claude config where workspace trust is pre-approved (default `~/.claude.json`)
 - `CRS_HEADLESS_DANGEROUS` — use `--dangerously-skip-permissions` instead of the `auto` default
 - `CRS_HEADLESS_PERM_FLAGS` — exact permission-flags override (`""` = none)
 - `CRS_KEEPAWAKE` — `0` disables the keep-awake hold (default on; macOS `pmset` / Linux `systemd-inhibit`, AC only)
