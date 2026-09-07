@@ -48,13 +48,20 @@ export PATH="$ROOT/bin:$PATH"
 . "$(cd "$(dirname "$0")" && git rev-parse --show-toplevel)/tests/lib.sh"
 assert_nonzero(){ [ "$1" -ne 0 ] && ok "$2" || ko "$2 — expected nonzero exit, got 0"; }
 
+# Hermetic env: the driver honors CRS_* switches and $HOME, and a runner that is itself a spawned
+# session inherits CRS_SPAWN_CWD, which would override every cwd below. Drop inherited switches (tests
+# set their own per call), give the driver a throwaway HOME, and run from a controlled work dir.
+unset CRS_SPAWN_CWD CRS_KEEPAWAKE CRS_HEADLESS_DANGEROUS CRS_HEADLESS_PERM_FLAGS
+export HOME="$ROOT/home"; mkdir -p "$HOME"
+WORK="$ROOT/work"; mkdir -p "$WORK"; cd "$WORK"
+
 # Shared env: point STATE_DIR and CLAUDE_PROJECTS_DIR at isolated temp dirs.
 STATE="$ROOT/headless"; mkdir -p "$STATE"
 PROJECTS="$ROOT/projects"; mkdir -p "$PROJECTS"
 
 # CRS_CLAUDE_CONFIG points trust pre-approval at a throwaway config — the suite never touches ~/.claude.json
 CONFIG="$ROOT/claude.json"
-printf '{"projects": {"%s": {"hasTrustDialogAccepted": true}}}\n' "$(pwd -P)" > "$CONFIG"   # runner cwd trusted; 41–45 exercise the pre-approval
+printf '{"projects": {"%s": {"hasTrustDialogAccepted": true}}}\n' "$(pwd -P)" > "$CONFIG"   # work dir trusted; 41–45 exercise the pre-approval
 run(){ CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" \
        bash "$DRIVER" "$@" 2>&1; }
 run_rc(){ CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" \
