@@ -1,0 +1,10 @@
+{
+  "_note": "ListAgents name -> claude.ai ID (bridgeSessionId). An ID changes when the session is recreated: refresh when get_run_log answers 404 or shows another conversation. All values below are placeholders.",
+  "pilot": { "name": "pilot-desktop", "session_id": "session_01EXAMPLEPILOT0000000001", "machine": "windows-desktop" },
+  "targets": [
+    { "name": "workspace", "session_id": "session_01EXAMPLEWORKSPACE000001", "machine": "mac", "cwd": "~/src/<project>",       "ssh": "mac", "seen": "2026-09-07" },
+    { "name": "builder",   "session_id": "session_01EXAMPLEBUILDER00000001", "machine": "mac", "cwd": "~/src/<project>/infra", "ssh": "mac", "seen": "2026-09-07", "note": "local to workspace (kind interactive)" },
+    { "name": "build-box", "session_id": "session_01EXAMPLEBUILDBOX0000001", "machine": "?",   "cwd": "?",                     "ssh": "?",   "seen": "2026-09-07", "note": "claude remote-control server, machine to confirm" },
+    { "name": "pi-lab",    "session_id": "session_01EXAMPLEPILAB0000000001", "machine": "pi",  "cwd": "~",                     "ssh": "pi",  "seen": "2026-09-07" }
+  ]
+}

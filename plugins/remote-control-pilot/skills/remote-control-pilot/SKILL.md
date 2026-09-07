@@ -1,224 +1,235 @@
 ---
 name: remote-control-pilot
 description: >-
-  Piloter à distance une ou plusieurs sessions Claude Code connectées en Remote Control sur
-  d'autres machines (Mac, Pi, desktop, serveur…) : les retrouver (ListAgents + ID de session
-  claude.ai), leur envoyer des instructions tour par tour (SendMessage avec accusé de fin), et
-  surtout LIRE ce qu'elles ont réellement fait grâce à RemoteTrigger get_run_log — le retour que
-  SendMessage ne fournit jamais. Utiliser ce skill dès que l'utilisateur veut contrôler, piloter,
-  orchestrer, interroger ou surveiller une autre session Claude (« ma session workspace »,
-  « la session sur le mac-studio », « qu'a fait homecloud ? », « envoie ça à l'autre session »),
-  parle de multi-session, de Remote Control, de SendMessage ou ListAgents, ou se plaint de ne pas
-  voir le résultat d'un message envoyé à une autre session — même sans prononcer le mot skill.
+  Drive one or more Claude Code sessions connected through Remote Control on other machines
+  (a Mac, a Pi, a desktop, a server): find them (ListAgents + the claude.ai session ID), send them
+  instructions one turn at a time (SendMessage with a completion callback), and above all READ
+  what they actually did with RemoteTrigger get_run_log — the return channel SendMessage never
+  provides. Use this skill whenever the user wants to control, pilot, orchestrate, query or watch
+  another Claude session ("my workspace session", "the session on the build box", "what did the pi
+  session do?", "send this to the other session"), mentions multi-session work, Remote Control,
+  SendMessage or ListAgents, or complains that a message sent to another session came back with
+  nothing — even when the word skill is never spoken.
 ---
 
-# Piloter des sessions Claude Code Remote Control
+# Piloting Claude Code Remote Control sessions
 
-Trois canaux, trois outils. Aucun ne fait le travail des deux autres :
+Three channels, three tools. None of them does the job of the other two:
 
-| Besoin | Outil | Ce qu'il donne |
+| Need | Tool | What it gives you |
 |---|---|---|
-| Retrouver les sessions | `ListAgents` | nom, `[ref]`, kind (`Remote Control` / `cloud` / local), statut `idle` / `busy` / `offline` |
-| Donner un ordre | `SendMessage({to, message})` | un accusé d'**envoi**, jamais le résultat |
-| Lire ce qui s'est passé | `RemoteTrigger({action:"get_run_log", session_id})` | le transcript condensé de la session (tours, outils, erreurs, fin de tour) |
+| Find the sessions | `ListAgents` | name, `[ref]`, kind (`Remote Control` / `cloud` / local), status `idle` / `busy` / `offline` |
+| Give an order | `SendMessage({to, message})` | an acknowledgement that the message **left**, never the result |
+| Read what happened | `RemoteTrigger({action:"get_run_log", session_id})` | the session's condensed transcript (turns, tools, errors, end-of-turn markers) |
 
-Le problème classique — « le message part mais impossible de savoir ce que la session a fait » —
-vient de l'oubli du troisième canal. `SendMessage` est un envoi de courrier ; `get_run_log` est la
-lecture du journal de bord de l'autre session, en quasi temps réel, depuis n'importe quelle session
-du même compte claude.ai. Boucle complète vérifiée le 2026-09-07 sur Claude Code 2.1.260 : ordre
-reçu par une session Remote Control sur Mac, exécution, rappel `SendMessage` arrivé sur Windows au
-moment même où l'émetteur recevait son `success`, relecture du tour par `get_run_log` (sorties
-réelles et chronologie : `references/mecanismes-verifies.md`).
+The classic complaint — "the message goes out but there is no way to know what the remote session
+did" — comes from forgetting the third channel. `SendMessage` is mail; `get_run_log` is reading the
+other session's logbook, in near real time, from any session of the same claude.ai account. The full
+loop was verified on 2026-09-07 with Claude Code 2.1.260: order received by a Remote Control session
+on a Mac, executed, `SendMessage` callback delivered to a Windows session at the very moment the
+sender got its `success`, turn read back with `get_run_log` (real outputs and timelines:
+`references/verified-mechanics.md`).
 
-Si `RemoteTrigger` n'apparaît pas dans les outils chargés, il est différé : `ToolSearch("select:RemoteTrigger")`
-le rend appelable. Idem pour tout outil cité ici.
+If `RemoteTrigger` is not among the loaded tools it is deferred: `ToolSearch("select:RemoteTrigger")`
+makes it callable. Same for any tool named here.
 
-## Prérequis
+## Prerequisites
 
-**Session pilote (celle qui exécute ce skill)** — un terminal `claude` interactif connecté en
-Remote Control (`claude --remote-control "pilote-<machine>"` ou `/rc` dans une session existante).
-C'est la condition pour voir les sessions des autres machines *et* pour que les cibles puissent
-répondre : sans Remote Control côté pilote, le message part « sans adresse de réponse ».
-Deux contextes ne conviennent que partiellement :
-- **App desktop Claude (onglet Code)** : `ListAgents` et `get_run_log` marchent, et elle **reçoit**
-  les messages venus d'autres machines, mais `SendMessage` y est désactivé (« SendMessage is
-  disabled for this session, in subagents as well as here »). On peut y *surveiller* et recevoir
-  des comptes rendus, pas *commander*.
-- **Sessions cloud (claude.ai/code)** : elles reçoivent des messages mais ne peuvent pas répondre.
+**Pilot session (the one running this skill)** — an interactive `claude` terminal connected to
+Remote Control (`claude --remote-control "pilot-<machine>"` or `/rc` inside an existing session).
+That is what lets it see sessions on other machines *and* what gives targets a reply address:
+without Remote Control on the pilot side the message leaves "with no reply address".
+Two contexts only partly qualify:
+- **Claude desktop app (Code tab)**: `ListAgents` and `get_run_log` work, and it **receives**
+  messages from other machines, but `SendMessage` is disabled there ("SendMessage is disabled for
+  this session, in subagents as well as here"). It can *watch* and collect reports, not *command*.
+- **Cloud sessions (claude.ai/code)**: they receive messages but cannot reply.
 
-**Sessions cibles** — sur chaque machine à piloter :
+**Target sessions** — on every machine to pilot:
 ```bash
-claude --remote-control "<nom-unique>"        # session interactive + Remote Control
-claude remote-control --name "<nom-unique>"   # mode serveur : sans saisie locale, reprend seul après un crash
+claude --remote-control "<unique-name>"        # interactive session + Remote Control
+claude remote-control --name "<unique-name>"   # server mode: no local typing, recovers by itself after a crash
 ```
-Un nom unique et parlant (`workspace`, `mac-studio`, `homecloud`) est ce qui rend la session
-retrouvable ; `/rename <nom>` fonctionne aussi après coup. Deux sessions au même nom obligent à
-adresser avec le `[ref]`. Le processus doit rester vivant (terminal ouvert, tmux, service) : une
-session dont le terminal est fermé passe `offline`. Version ≥ 2.1.251 sur toutes les machines
-(corrections décisives de SendMessage en Remote Control dans 2.1.248 et 2.1.251).
+A unique, meaningful name (`workspace`, `build-box`, `pi-lab`) is what makes a session findable;
+`/rename <name>` works after the fact too. Two sessions with the same name force you to address
+them with the `[ref]`. The process must stay alive (open terminal, tmux, a service): a session whose
+terminal was closed shows `offline`. Version ≥ 2.1.251 everywhere (decisive SendMessage fixes for
+Remote Control landed in 2.1.248 and 2.1.251).
 
-Pour qu'une cible travaille sans humain devant l'écran, ses permissions doivent déjà couvrir la
-tâche (mode `auto`, `acceptEdits`, règles `allow`) : un message venu d'une autre session **ne vaut
-jamais consentement** — il ne peut ni approuver une permission, ni modifier la configuration, ni
-lancer une commande `/slash`. Une cible en `bypassPermissions` met de son côté les messages des
-autres sessions en attente d'approbation (5 min, puis abandon) sauf si `crossSessionInbound: "accept"`
-est dans ses settings utilisateur.
+For a target to work with nobody at the screen, its permissions must already cover the task
+(`auto` mode, `acceptEdits`, `allow` rules): a message from another session **never counts as
+consent** — it cannot approve a permission, change configuration, or run a `/slash` command. A target
+in `bypassPermissions` holds messages from other sessions for approval (5 minutes, then dropped)
+unless `crossSessionInbound: "accept"` is in its user settings.
 
-## Étape 1 — Retrouver les sessions et leurs identifiants
+## Step 1 — Find the sessions and their identifiers
 
-Appeler `ListAgents`. La première ligne donne le **nom de la session pilote** (l'adresse à laquelle
-les cibles répondent) ; chaque ligne suivante, une session joignable :
+Call `ListAgents`. The first line gives the **pilot's own name** (the address targets reply to);
+every following line is a reachable session:
 ```
-This session is pilote-desktop [427c62] — the name other sessions use to message it
-Peer sessions (4):
-  workspace [d60591]  ·  Remote Control  ·  idle
-  mac-studio [81e589]  ·  Remote Control  ·  idle
+This session is pilot-desktop [a1b2c3] — the name other sessions use to message it
+Peer sessions (3):
+  workspace [d4e5f6]  ·  Remote Control  ·  idle
+  build-box [789abc]  ·  Remote Control  ·  idle
 ```
-La liste est lue « plus récentes d'abord » sur un nombre borné de pages : si elle se termine par
-« session list too long to fetch completely », une cible ancienne peut manquer — la réveiller
-depuis claude.ai/l'app suffit à la faire remonter, et archiver les vieilles sessions cloud assainit
-la liste. Deux détails observés : le `[ref]` d'une même session **change selon la session qui
-liste** (ne jamais le stocker), et dans une session Remote Control la première ligne « This
-session is … » peut manquer — le nom du pilote est alors celui passé à `--name` /
-`--remote-control` / `/rename`, ou le champ `name` de son `~/.claude/sessions/<pid>.json`.
+The list is read "newest first" over a bounded number of pages: when it ends with "session list
+too long to fetch completely", an older target may be missing — waking it from claude.ai or the app
+is enough to bring it back up, and archiving old cloud sessions cleans the list. Two observed
+details: the `[ref]` of one session **changes depending on which session lists it** (never store
+it), and inside a Remote Control session the first line "This session is …" may be missing — the
+pilot's name is then the one passed to `--name` / `--remote-control` / `/rename`, or the `name`
+field of its `~/.claude/sessions/<pid>.json`.
 
-Pour *lire* une session il faut en plus son **ID claude.ai** `session_01…` (24 caractères après
-`session_`), que `ListAgents` n'affiche pas. Quatre sources, de la plus simple à la plus manuelle :
+To *read* a session you also need its **claude.ai ID** `session_01…` (24 characters after
+`session_`), which `ListAgents` does not show. Four sources, simplest first:
 
-1. **L'en-tête d'un message reçu** : tout message inter-sessions arrive enveloppé dans
+1. **The header of a received message**: every cross-session message arrives wrapped in
    `<cross-session-message from="bridge:session_01…" from-name="workspace" from-mode="prompting">`.
-   Le premier contact suffit donc : demander à chaque cible un simple accusé (gabarit « premier
-   contact » dans `assets/enveloppe-instruction.md`) et lire l'ID dans le `from`.
-2. **La sidebar de claude.ai/code** : chaque session est un lien `/code/session_01…` ; ouvrir la
-   session et copier l'URL (l'ID est ce qui suit `/code/`, avant tout `?`).
-3. **Le registre local de la machine cible** : `~/.claude/sessions/<pid>.json` contient `name`,
-   `bridgeSessionId`, `cwd`, `kind`, `entrypoint`, `version`. `scripts/rc-sessions.sh` le lit
-   depuis un shell (machine courante ou `--ssh <hôte>`). Le dossier contient aussi les jetons
-   `.key` du socket, et le classificateur du mode auto **bloque** sa lecture par Claude (`cat`,
-   puis `ls`+`head`, refusés lors du test) : passer par un shell humain, SSH, ou une règle `allow`
-   explicite. Sans `bridgeSessionId`, la session n'est pas en Remote Control.
-4. **Demander à la cible de lire son registre** — même réserve qu'en 3 ; préférer 1.
+   First contact is therefore enough: ask each target for a plain acknowledgement (the "first
+   contact" template in `assets/instruction-envelope.md`) and read the ID in `from`.
+2. **The claude.ai/code sidebar**: each session is a link `/code/session_01…`; open the session and
+   copy the URL (the ID is what follows `/code/`, before any `?`).
+3. **The target machine's local registry**: `~/.claude/sessions/<pid>.json` holds `name`,
+   `bridgeSessionId`, `cwd`, `kind`, `entrypoint`, `version`. `scripts/rc-sessions.sh` reads it from
+   a shell (current machine or `--ssh <host>`). The folder also holds the socket's `.key` tokens,
+   and the auto-mode classifier **blocks** Claude from reading it (`cat`, then `ls`+`head`, refused
+   during the test): go through a human shell, SSH, or an explicit `allow` rule. No
+   `bridgeSessionId` means the session is not on Remote Control.
+4. **Ask the target to read its own registry** — same caveat as 3; prefer 1.
 
-Consigner le résultat dans un petit registre (`assets/registre-sessions.example.json` donne le
-format) : nom → ID → machine → cwd → date. Un ID survit aux reconnexions (`claude --continue` rattache
-la même session claude.ai) mais pas à un `claude remote-control` neuf ; quand `get_run_log` répond
-404 ou que le contenu ne correspond plus, rafraîchir l'entrée.
+Keep the result in a small registry (`assets/session-registry.example.json` shows the shape):
+name → ID → machine → cwd → date. An ID survives reconnections (`claude --continue` reattaches the
+same claude.ai session) but not a fresh `claude remote-control`; when `get_run_log` answers 404 or
+the content no longer matches, refresh the entry.
 
-## Étape 2 — Envoyer une instruction
+## Step 2 — Send an instruction
 
-Une instruction par message, et pas de nouveau message tant que le tour précédent n'est pas fini :
-la cible lit les messages **entre deux appels d'outils** pendant un tour, et démarre un nouveau tour
-si elle est idle. Un second ordre envoyé en plein travail serait lu au milieu de l'exécution du
-premier, et les rafales sont refusées ou mises en file.
+One instruction per message, and no new message until the previous turn has finished: the target
+reads messages **between two tool calls** during a turn, and starts a new turn if it is idle. A
+second order sent mid-work would be read in the middle of executing the first one, and bursts are
+refused or queued.
 
-Adresser avec le nom exactement tel que `ListAgents` l'imprime ; ajouter le `[ref]` seulement si
-deux lignes partagent le nom ou si l'erreur le demande. `SendMessage` peut être différé
-(`ToolSearch("select:SendMessage")`) ; suivre le schéma chargé (destinataire, message, et un
-`summary` d'une ligne repris dans le résultat). Le résultat ressemble à
-`{"success":true,"message":"“<summary>” → workspace (a Claude session on another machine, over
-Remote Control; …)","msg_id":"…"}` : il confirme le destinataire et le canal, pas l'exécution, et il
-peut mettre ~20 s à revenir. `notify_when_idle` ne fonctionne qu'entre sessions d'une même
-machine : à distance, l'accusé de fin doit être demandé explicitement.
+Address with the name exactly as `ListAgents` prints it; add the `[ref]` only when two rows share
+the name or an error asks for it. `SendMessage` may be deferred (`ToolSearch("select:SendMessage")`);
+follow the loaded schema (recipient, message, and a one-line `summary` echoed in the result). The
+result looks like `{"success":true,"message":"“<summary>” → workspace (a Claude session on another
+machine, over Remote Control; …)","msg_id":"…"}`: it confirms the recipient and the channel, not
+the execution, and it can take ~20 s to come back. `notify_when_idle` only works between sessions
+on the same machine: across machines the completion notice has to be requested explicitly.
 
-Utiliser l'enveloppe d'`assets/enveloppe-instruction.md`. Ses deux ingrédients rendent le retour
-détectable sans ambiguïté :
-- une **ligne sentinelle unique** en fin de réponse (`FIN <TAG> OK` / `FIN <TAG> ERREUR …`), que
-  `get_run_log` retrouve même si le reste du texte est tronqué ;
-- un **rappel par `SendMessage` vers la session pilote**, qui réveille celle-ci (un message reçu
-  par une session idle démarre un tour) et transporte le résumé complet.
+Use the envelope in `assets/instruction-envelope.md`. Its two ingredients make the outcome
+unambiguous to detect:
+- a **unique sentinel line** at the end of the answer (`END <TAG> OK` / `END <TAG> ERROR …`), which
+  `get_run_log` finds even when the rest of the text is truncated;
+- a **callback through `SendMessage` to the pilot**, which wakes the pilot (a message received by an
+  idle session starts a turn) and carries the full summary.
 
-Choisir un `TAG` court et unique par tâche (`T07-tests`, `WS-2026-09-07-1`). Rappeler dans le
-message que la tâche est mandatée par l'utilisateur, tout en sachant que la cible la traitera comme
-venant d'une session, pas de l'humain : les permissions manquantes bloqueront, pas contourneront.
+Pick a short, unique `TAG` per task (`T07-tests`, `WS-2026-09-07-1`). Say in the message that the task
+is mandated by the user, knowing the target will still treat it as coming from a session, not from
+the human: missing permissions will block, not be bypassed.
 
-Le résultat de `SendMessage` (« sent », « delivered ») signifie que le message est parti, rien de
-plus. Une cible `offline` ou qui refuse (`crossSessionInbound: refuse`) ne fera rien ; une cible qui
-« hold » attend une approbation humaine sur sa machine ou sur claude.ai.
+The `SendMessage` result ("sent", "delivered") means the message left, nothing more. A target that
+is `offline` or refuses (`crossSessionInbound: refuse`) does nothing; a target that "holds" waits for
+a human approval on its machine or on claude.ai.
 
-## Étape 3 — Lire le retour
+## Step 3 — Read the outcome
 
 ```
-RemoteTrigger({action: "get_run_log", session_id: "session_01CtH1M8FKe8jgHp6sVKey6r"})
+RemoteTrigger({action: "get_run_log", session_id: "session_01EXAMPLEWORKSPACE000001"})
 ```
-Réponse : un en-tête JSON (`events_fetched`, `events_shown`, `next_cursor`), la liste des
-événements de contrôle ignorés, puis les **200 événements les plus récents**, du plus ancien au plus
-récent, horodatés en UTC :
+Response: a JSON header (`events_fetched`, `events_shown`, `next_cursor`), the list of skipped
+control events, then the **200 most recent events**, oldest to newest, UTC timestamps:
 ```
-[2026-09-06T23:13:11Z] user: yes faisons comme polaris stp, fais la repasse
+[2026-09-06T23:13:11Z] user: yes, align it with the reference implementation, do the pass
 [2026-09-06T23:13:36Z] assistant: [thinking]
-[2026-09-06T23:14:04Z] tool_use Bash: {"command":"cd /Users/username/src/… [+6784 chars]
-[2026-09-06T23:14:06Z] tool_result: Dnd/Rma config patched …
+[2026-09-06T23:14:04Z] tool_use Bash: {"command":"cd ~/src/<project>; python3 - <<'PY'… [+6784 chars]
+[2026-09-06T23:14:06Z] tool_result: config patched, source models written
 [2026-09-06T23:15:39Z] tool_result ERROR: Exit code 1 …
-[2026-09-06T23:24:56Z] assistant: Repasse terminée, Altair fait maintenant comme polaris. …
+[2026-09-06T23:24:56Z] assistant: Pass done, the form now matches the reference. …
 [2026-09-06T23:24:56Z] result: success is_error=false turns=29 duration=0s
 [2026-09-06T23:55:57Z] system/worker_shutting_down: host_exit
 ```
-Lecture :
-- `result:` = **fin de tour**. Le texte final de la cible est le dernier `assistant:` (hors
-  `[thinking]`) avant ce `result:`. Vérifier qu'il porte la sentinelle `FIN <TAG>`.
-- Aucun `user:` contenant le message envoyé → il n'est pas arrivé (cible offline, message en
-  attente d'approbation, refusé, ou liste tronquée). Un message inter-sessions apparaît comme
-  `user: <cross-session-message from="bridge:session_01…" from-name="<pilote>"
-  from-mode="prompting"> … </cross-session-message>` ; chercher le TAG dans ce bloc.
-- `user:` présent, `tool_use`/`tool_result` qui s'ajoutent → **en cours** ; relire plus tard.
-- `user:` présent, plus rien depuis plusieurs minutes, pas de `result:` → **bloquée** : permission
-  à approuver ou question posée (`AskUserQuestion`) ; seul l'humain répond, depuis claude.ai ou
-  l'app mobile. Le dire à l'utilisateur plutôt que d'attendre.
-- `tool_result ERROR:` → recopier la cause ; « denied by the Claude Code auto mode classifier »
-  ou « Permission … denied » = la tâche dépasse les permissions de la cible.
-- `init:` répétés = reconnexions, pas des tours. `system/worker_shutting_down: host_exit` = la
-  session s'est arrêtée (`/exit`) ; `ListAgents` la montrera `offline` ou absente.
-- Les textes longs sont coupés (`[+N chars]`) : pour un résultat volumineux, demander à la cible de
-  l'écrire dans un fichier ou de l'envoyer dans le rappel `SendMessage`.
-- `next_cursor` ne pagine que vers le **passé** ; chaque appel renvoie les derniers événements.
-  Un appel ≈ 10-40 Ko : espacer les relectures de 30-60 s, pas de boucle serrée.
+How to read it:
+- `result:` = **end of turn**. The target's final text is the last `assistant:` line (excluding
+  `[thinking]`) before that `result:`. Check that it carries the sentinel `END <TAG>`.
+- No `user:` containing the message you sent → it did not arrive (target offline, message held for
+  approval, refused, or list truncated). A cross-session message shows up as
+  `user: <cross-session-message from="bridge:session_01…" from-name="<pilot>"
+  from-mode="prompting"> … </cross-session-message>`; look for the TAG inside that block.
+- `user:` present, `tool_use`/`tool_result` lines still being added → **in progress**; read again later.
+- `user:` present, nothing for several minutes, no `result:` → **blocked**: a permission to approve
+  or a question asked (`AskUserQuestion`); only the human answers, from claude.ai or the mobile app.
+  Tell the user rather than waiting.
+- `tool_result ERROR:` → copy the cause; "denied by the Claude Code auto mode classifier" or
+  "Permission … denied" = the task exceeds the target's permissions.
+- Repeated `init:` lines = reconnections, not turns. `system/worker_shutting_down: host_exit` = the
+  session exited (`/exit`); `ListAgents` will show it `offline` or not at all.
+- Long texts are cut (`[+N chars]`): for a large result, ask the target to write it to a file or to
+  put it in the `SendMessage` callback.
+- `next_cursor` only pages **backwards**; every call returns the latest events. One call ≈ 10-40 KB:
+  space re-reads 30-60 s apart, no tight loop.
 
-`get_run_log` fonctionne sur toute session claude.ai du compte (Remote Control, cloud, app
-desktop) tant qu'on a son `session_…` ; il reflète les événements de la seconde même.
+`get_run_log` works on any claude.ai session of the account (Remote Control, cloud, desktop app) as
+long as you have its `session_…`; it reflects events of the very same second.
 
-## Étape 4 — La boucle de pilotage, tour par tour
+## Step 4 — The piloting loop, one turn at a time
 
 ```
-registre ← ListAgents + IDs (étape 1)
-pour chaque étape de la tâche :
-  1. SendMessage(to: <nom>, message: enveloppe(TAG, instruction, rappel vers <pilote>))
-  2. attendre : le rappel réveille la session pilote si elle est idle (il est chez elle au moment
-     du `success` de l'émetteur) ; sinon relire get_run_log toutes les 30-60 s
-  3. lire : terminé (result + sentinelle) / en cours / bloquée / non délivrée / erreur
-  4. décider l'étape suivante à partir du texte final et des erreurs réelles, pas du résumé seul
-  5. journal : horodatage, cible, TAG, verdict, une ligne de résultat
+registry ← ListAgents + IDs (step 1)
+for each step of the task:
+  1. SendMessage(to: <name>, message: envelope(TAG, instruction, callback to <pilot>))
+  2. wait: the callback wakes the pilot if it is idle (it reaches the pilot at the moment the
+     sender gets its `success`); otherwise re-read get_run_log every 30-60 s
+  3. read: done (result + sentinel) / in progress / blocked / not delivered / error
+  4. decide the next step from the final text and the real errors, not from the summary alone
+  5. log: timestamp, target, TAG, verdict, one line of result
 ```
-Pour attendre sans bloquer : `Bash({command: "sleep 45", run_in_background: true})` puis relire à
-la notification (un `sleep` en avant-plan est souvent interdit par le harness), ou `/loop` /
-`ScheduleWakeup` pour une tâche longue. Fixer un délai maximal par étape et, au-delà, relire une
-dernière fois puis informer l'utilisateur de l'état exact plutôt que de renvoyer l'ordre.
+To wait without blocking: `Bash({command: "sleep 45", run_in_background: true})` then re-read on
+the notification (a foreground `sleep` is often forbidden by the harness), or `/loop` /
+`ScheduleWakeup` for a long task. Set a maximum delay per step and, past it, read one last time then
+tell the user the exact state rather than resending the order.
 
-**Plusieurs cibles** : un message par session, chacune avec son TAG, puis une relecture par ID ; tenir
-le tableau `assets/journal-template.md` (nom, ID, machine, statut, dernier résultat). Ne jamais faire
-transiter des ordres d'une cible à une autre (boucles A→B→A, que Claude Code étrangle mais qu'il vaut
-mieux ne pas créer) : le pilote reste le seul émetteur.
+**Several targets**: one message per session, each with its own TAG, then one read per ID; keep the
+table in `assets/pilot-log-template.md` (name, ID, machine, status, last result). Never route orders
+from one target to another (A→B→A loops, which Claude Code throttles but which are better not
+created): the pilot stays the only sender.
 
-**Rapport à l'utilisateur** : citer ce que la cible a *fait* (outils, fichiers, erreurs vus dans le
-log), pas seulement ce qu'elle *dit* avoir fait ; donner le nom et l'ID de la session pour qu'il
-puisse ouvrir la même page sur claude.ai.
+**Reporting to the user**: quote what the target *did* (tools, files, errors seen in the log), not
+only what it *says* it did; give the session's name and ID so they can open the same page on
+claude.ai.
 
-## Pièges fréquents (détails et correctifs : `references/depannage.md`)
+## Transferring files to a target
 
-- Message envoyé, aucun retour → normal ; relire avec `get_run_log`, demander le rappel.
-- La cible ne peut pas répondre → la session pilote n'est pas en Remote Control (pas d'adresse de réponse).
-- Message jamais reçu → cible `offline`, en attente d'approbation (`hold`), `refuse`, ou liste tronquée.
-- `SendMessage` absent → app desktop, ou règle `deny` sur `SendMessage`/`ListAgents`.
-- Les outils `ccd_session_mgmt` (`list_sessions`, `list_events`, `send_message`) ne voient que
-  l'app desktop locale : inutiles entre machines.
-- `get_run_log` → 400 « must be a cse_… or session_… tagged ID » : on a passé le `[ref]` ou l'UUID
-  local au lieu de l'ID claude.ai.
-- La cible ne peut pas lire `~/.claude/sessions` (classificateur auto) → prendre l'ID dans
-  l'en-tête de son message, pas dans son registre.
+`SendMessage` carries text only. Without SSH between the machines, the channel that works is an
+**Artifact** on claude.ai (private, tied to the account): publish a page that embeds each file as
+plain text in a `<pre data-path="path">` block (with `&amp; &lt; &gt;` escaped) plus a SHA-256
+manifest, then pass the URL in the instruction. The target reads the raw HTML with
+`Artifact({action: "read", url})` — the full page is saved to a local file — then recreates each
+file with `Write` and checks the digests. Do not ask it to decode the page with a script: the
+auto-mode classifier blocks Bash/Python transformation of downloaded content (`base64 -d`, an
+extraction script, even a `cp` of the page) while `Write` goes through. A write outside the
+target's working directory triggers a **permission prompt** (the session shows "Needs input" on
+claude.ai and `get_run_log` stops moving): only the human approves it, from claude.ai, the app or
+the terminal — one "Always allow" covers the following files. Verified on 2026-09-07: 8 files,
+78 KB, Windows → Mac, SHA-256 identical on arrival.
 
-## Fichiers du skill
+## Frequent pitfalls (details and fixes: `references/troubleshooting.md`)
 
-- `references/mecanismes-verifies.md` — ce qui a été testé, avec les sorties réelles et les versions.
-- `references/depannage.md` — symptômes → causes → correctifs, y compris les bugs corrigés par version.
-- `scripts/rc-sessions.sh` — nom ↔ `bridgeSessionId` depuis `~/.claude/sessions`, local ou via SSH.
-- `assets/enveloppe-instruction.md` — gabarit du message d'instruction (sentinelle + rappel).
-- `assets/journal-template.md`, `assets/registre-sessions.example.json` — suivi multi-sessions.
+- Message sent, nothing back → normal; read with `get_run_log`, ask for the callback.
+- The target cannot reply → the pilot session is not on Remote Control (no reply address).
+- Message never received → target `offline`, held for approval (`hold`), `refuse`, or truncated list.
+- `SendMessage` missing → desktop app, or a `deny` rule on `SendMessage`/`ListAgents`.
+- The `ccd_session_mgmt` tools (`list_sessions`, `list_events`, `send_message`) only see the local
+  desktop app: useless across machines.
+- `get_run_log` → 400 "must be a cse_… or session_… tagged ID": you passed the `[ref]` or the local
+  UUID instead of the claude.ai ID.
+- The target cannot read `~/.claude/sessions` (auto classifier) → take the ID from the header of
+  its message, not from its registry.
+
+## Files in this skill
+
+- `references/verified-mechanics.md` — what was tested, with real (anonymized) outputs and versions.
+- `references/troubleshooting.md` — symptoms → causes → fixes, including bugs fixed per version.
+- `scripts/rc-sessions.sh` — name ↔ `bridgeSessionId` from `~/.claude/sessions`, local or over SSH.
+- `assets/instruction-envelope.md` — template of the instruction message (sentinel + callback).
+- `assets/pilot-log-template.md`, `assets/session-registry.example.json` — multi-session tracking.
