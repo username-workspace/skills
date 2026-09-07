@@ -16,6 +16,14 @@
       "homepage": "https://github.com/username-workspace/skills/tree/main/plugins/claude-remote-spawn"
     },
     {
+      "name": "remote-control-pilot",
+      "version": "1.0.0",
+      "source": "./plugins/remote-control-pilot",
+      "description": "Pilot Claude Code sessions connected over Remote Control on other machines: find them (ListAgents + claude.ai session ID), send them one instruction per turn (SendMessage with an end-of-turn callback), and read what they actually did with RemoteTrigger get_run_log, the feedback SendMessage never returns. Includes a shell helper mapping session names to their claude.ai IDs.",
+      "category": "development",
+      "homepage": "https://github.com/username-workspace/skills/tree/main/plugins/remote-control-pilot"
+    },
+    {
       "name": "aws-remote-auth",
       "version": "1.0.3",
       "source": "./plugins/aws-remote-auth",

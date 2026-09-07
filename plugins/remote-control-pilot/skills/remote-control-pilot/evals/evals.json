@@ -1,0 +1,24 @@
+{
+  "skill_name": "remote-control-pilot",
+  "_note": "Run from a terminal session connected to Remote Control (SendMessage is disabled in the desktop app and its subagents). Targets must be online.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "My workspace session runs on the Mac in ~/src/<project>. Ask it to run the frontend tests and tell me the real result when it is done, not just 'message sent'.",
+      "expected_output": "ListAgents, SendMessage with the envelope (TAG + sentinel + callback), wait, get_run_log read of the target's session_… ID, report quoting the real tool_result lines (test counts, errors) and the session ID.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "what did the pi-lab session do in the last hour? I sent nothing, I just want to know",
+      "expected_output": "No SendMessage. ID resolution (registry / URL / message header / script), get_run_log, timestamped summary of turns and tools, mention of any errors.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "i have 3 remote control sessions (workspace, build-box, pi-lab). ask each one which node version is installed and make me a table. one of them may be offline",
+      "expected_output": "One message per target with a distinct TAG, one read per ID, table name/ID/status/version, offline status reported without resending in a loop, log kept.",
+      "files": []
+    }
+  ]
+}
