@@ -157,9 +157,10 @@ How to read it:
   `user: <cross-session-message from="bridge:session_01…" from-name="<pilot>"
   from-mode="prompting"> … </cross-session-message>`; look for the TAG inside that block.
 - `user:` present, `tool_use`/`tool_result` lines still being added → **in progress**; read again later.
-- `user:` present, nothing for several minutes, no `result:` → **blocked**: a permission to approve
-  or a question asked (`AskUserQuestion`); only the human answers, from claude.ai or the mobile app.
-  Tell the user rather than waiting.
+- `permission prompt <Tool>: {…}` with no `tool_result` after it, or `user:` present and nothing
+  for several minutes without `result:` → **blocked**: a permission to approve or a question asked
+  (`AskUserQuestion`); only the human answers, from claude.ai or the mobile app (the pilot may click
+  it on claude.ai/code on the user's explicit mandate). Tell the user rather than waiting.
 - `tool_result ERROR:` → copy the cause; "denied by the Claude Code auto mode classifier" or
   "Permission … denied" = the task exceeds the target's permissions.
 - Repeated `init:` lines = reconnections, not turns. `system/worker_shutting_down: host_exit` = the
@@ -210,8 +211,12 @@ auto-mode classifier blocks Bash/Python transformation of downloaded content (`b
 extraction script, even a `cp` of the page) while `Write` goes through. A write outside the
 target's working directory triggers a **permission prompt** (the session shows "Needs input" on
 claude.ai and `get_run_log` stops moving): only the human approves it, from claude.ai, the app or
-the terminal — one "Always allow" covers the following files. Verified on 2026-09-07: 8 files,
-78 KB, Windows → Mac, SHA-256 identical on arrival.
+the terminal — one "Always allow" covers the following files. Keep the page lean: on a large page
+`Artifact read` returns only the head and saves the full HTML to a local file, which the target then
+reads with `Read` (offset/limit); a single base64 line of an embedded archive costs ~28k tokens to
+read past, so put such a blob last or leave it out. Verified twice on 2026-09-07: 8 files, ~80 KB,
+Windows → Mac, SHA-256 identical on arrival, then committed, pushed and opened as a pull request
+by the target.
 
 ## Frequent pitfalls (details and fixes: `references/troubleshooting.md`)
 

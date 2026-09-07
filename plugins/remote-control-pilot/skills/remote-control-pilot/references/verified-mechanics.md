@@ -113,10 +113,13 @@ HTTP 200
 [2026-09-06T19:02:24.444288Z] init: model=claude-opus-5[1m] cwd=
 ```
 Line grammar: `[ISO-UTC] <kind>: <text>` with kind ∈ `init`, `user`, `assistant`,
-`tool_use <Tool>`, `tool_result`, `tool_result ERROR`, `result`, `system/<event>`,
-`code change published`. JSON inputs and long texts are truncated with `[+N chars]`.
+`tool_use <Tool>`, `tool_result`, `tool_result ERROR`, `permission prompt <Tool>`, `result`,
+`system/<event>`, `code change published`. JSON inputs and long texts are truncated with `[+N chars]`.
 
 Observed:
+- A pending permission prompt appears as `permission prompt Write: {…}` (the requested input
+  follows); the matching `tool_result` only arrives once a human has answered — six minutes later
+  in the file-transfer run (§8). It is the explicit marker of a blocked target.
 - Works on Remote Control sessions (Mac, Pi), on a desktop session, on finished sessions; 404/400
   otherwise. `session_d4e5f6` or `d4e5f6` → HTTP 400 "must be a cse_… or session_… tagged ID".
 - Near real time: the current session's log contained the tool calls of the turn in progress.
@@ -186,6 +189,7 @@ base64 zip in a `<script type="text/plain">`.
 | ≈10:03 | pilot (Chrome) | click "Always allow" on the user's explicit mandate → writing resumes |
 | 10:03 → ≈10:25 | workspace | 8 files recreated with `Write`: "the 8 SHA-256 digests match the manifest, and the script is executable"; `plugin.json` and `web.json` first refused by the classifier as `Write`, placed through the shell; hermetic plugin test 24/24, README regenerated, `claude plugin validate` OK |
 | ≈10:27 | workspace → pilot | commit on a `feat/…` branch (main protected, not pushed, MR to open); `SendMessage` callback received with path, checks and three remarks — the order → execution → report loop is complete |
+| later that morning | pilot → workspace → pilot | second round (SKILL-UPDATE, this v2 page): 8 files recreated with `Write`, SHA-256 identical, 5 old files deleted, tests 24/24, `claude plugin validate` OK, commit on the same branch, branch pushed, pull request opened; no permission prompt (folder already allowed). `Artifact read` had truncated the end of the page: the target used `Read` on the saved HTML with an offset to skip the ~28k-token base64 line |
 
 Lessons: `Artifact read` is an exact transfer channel between machines of the same account; the
 target must recreate files with `Write` (the classifier blocks script transformation of downloaded
