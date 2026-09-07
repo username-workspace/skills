@@ -1,0 +1,13 @@
+{
+  "category": "Agents",
+  "tagline": "Drive the Claude Code sessions running on your other machines, and read back what they did.",
+  "summary": "Remote Control lets Claude Code sessions on different machines see and message each other, but a sent message never brings its result back. remote-control-pilot closes the loop: it finds the target sessions, sends one instruction per turn with a sentinel line and a callback message, then reads the target's real transcript through RemoteTrigger get_run_log (tools called, errors hit, end of turn) so the pilot decides on evidence, not on a delivery receipt.",
+  "capabilities": [
+    "Finds reachable sessions with ListAgents and resolves their claude.ai session IDs from the message envelope, the claude.ai sidebar, or the local session registry",
+    "Sends one instruction per turn with a unique sentinel line and a SendMessage callback, so completion is detectable without polling",
+    "Reads the target's condensed transcript with RemoteTrigger get_run_log and classifies it: done, running, blocked on a permission, never delivered, or errored",
+    "Runs several targets in parallel with a per-session journal, the pilot staying the only sender",
+    "rc-sessions.sh maps session names to bridge session IDs from the local session registry, locally or over SSH, with no dependency"
+  ],
+  "platforms": ["macOS", "Linux", "Windows"]
+}

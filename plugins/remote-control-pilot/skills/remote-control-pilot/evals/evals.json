@@ -1,0 +1,24 @@
+{
+  "skill_name": "remote-control-pilot",
+  "_note": "À exécuter depuis une session terminal connectée en Remote Control (SendMessage est désactivé dans l'app desktop et ses sous-agents). Les cibles doivent être en ligne.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Ma session workspace tourne sur le Mac dans /Users/username/src/zv/workspace. Demande-lui de lancer les tests d'altair et dis-moi le résultat réel quand c'est fini, pas juste 'message envoyé'.",
+      "expected_output": "ListAgents, SendMessage avec enveloppe (TAG + sentinelle + rappel), attente, lecture get_run_log de session_01CtH1…, rapport citant les tool_result réels (nombre de tests, erreurs) et l'ID de session.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "qu'est-ce que la session homecloud a fait dans la dernière heure ? je n'ai rien envoyé, je veux juste savoir",
+      "expected_output": "Pas de SendMessage. Résolution de l'ID (registre/URL/script), get_run_log, résumé horodaté des tours et outils, mention des erreurs éventuelles.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "j'ai 3 sessions remote control (workspace, mac-studio, homecloud). demande à chacune la version de node installée et fais moi un tableau. l'une d'elles est peut-être offline",
+      "expected_output": "Un message par cible avec TAG distinct, relecture par ID, tableau nom/ID/statut/version, statut offline signalé sans renvoi en boucle, journal tenu.",
+      "files": []
+    }
+  ]
+}
