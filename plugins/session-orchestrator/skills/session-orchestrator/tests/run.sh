@@ -32,9 +32,10 @@ cat > "$STUB_AGENTS" <<'JSON'
  {"pid":502,"kind":"interactive","status":"idle","name":"workspace","cwd":"/Users/me/src/app","sessionId":"9192c7ef-0000-4000-8000-000000000502","startedAt":2},
  {"pid":504,"kind":"interactive","status":"busy","name":"builder","cwd":"/Users/me/src/infra","sessionId":"bbbb0000-0000-4000-8000-000000000504","startedAt":8},
  {"pid":503,"kind":"interactive","status":"waiting","waitingFor":"input needed","name":"reviewer","cwd":"/Users/me/src/app","sessionId":"aaaa0000-0000-4000-8000-000000000503","startedAt":9},
- {"id":"ab12cd34","kind":"background","state":"working","status":"busy","name":"refactor auth","cwd":"/Users/me/src/app","sessionId":"ab12cd34-0000-4000-8000-000000000001","startedAt":3},
- {"id":"ff00ff00","kind":"background","state":"blocked","status":"waiting","waitingFor":"permission prompt","name":"deploy staging","cwd":"/Users/me/src/infra","sessionId":"ff00ff00-0000-4000-8000-000000000002","startedAt":4},
- {"id":"d0d0d0d0","kind":"background","state":"done","name":"write changelog","cwd":"/Users/me/src/app","sessionId":"d0d0d0d0-0000-4000-8000-000000000003","startedAt":5}
+ {"id":"e0e0e0e0","kind":"background","state":"blocked","name":"old investigation","cwd":"/Users/me/src/app","sessionId":"e0e0e0e0-0000-4000-8000-000000000004","startedAt":1},
+ {"id":"ab12cd34","pid":601,"kind":"background","state":"working","status":"busy","name":"refactor auth","cwd":"/Users/me/src/app","sessionId":"ab12cd34-0000-4000-8000-000000000001","startedAt":3},
+ {"id":"ff00ff00","pid":602,"kind":"background","state":"blocked","status":"waiting","waitingFor":"permission prompt","name":"deploy staging","cwd":"/Users/me/src/infra","sessionId":"ff00ff00-0000-4000-8000-000000000002","startedAt":4},
+ {"id":"d0d0d0d0","pid":603,"kind":"background","state":"done","name":"write changelog","cwd":"/Users/me/src/app","sessionId":"d0d0d0d0-0000-4000-8000-000000000003","startedAt":5}
 ]
 JSON
 session 501 '{"pid":501,"name":"pilot-mac","bridgeSessionId":"session_01PILOTPILOTPILOTPILOT01","cwd":"/Users/me"}'
@@ -42,6 +43,7 @@ session 502 '{"pid":502,"name":"workspace","bridgeSessionId":"session_01WORKSPAC
 printf 'secret-token' > "$CLAUDE_CONFIG_DIR/sessions/502.abcdef.key"
 job ab12cd34 '{"state":"working","bridgeSessionId":"cse_01REFACTORREFACTOR000001","name":"refactor auth"}'
 job ff00ff00 '{"state":"blocked","needs":"approve the terraform apply","bridgeSessionId":"cse_01DEPLOYDEPLOYDEPLOY0001","name":"deploy staging"}'
+job e0e0e0e0 '{"state":"blocked","needs":"provide the API key","bridgeSessionId":"cse_01OLDOLDOLDOLDOLDOLD0001","name":"old investigation","updatedAt":"2026-01-01T00:00:00.000Z"}'
 job d0d0d0d0 '{"state":"done","output":{"result":"CHANGELOG.md updated, 12 entries"},"bridgeSessionId":"cse_01CHANGELOGCHANGELOG0001","name":"write changelog","updatedAt":"2026-01-01T00:00:00.000Z"}'
 
 echo "session-orchestrator tests"
@@ -54,7 +56,7 @@ assert_eq 0 "$code" "1. empty registry exits 0"
 
 # 2. sync → every local session imported with the id the harness gives it, the pilot excluded
 out=$(orch sync)
-assert_contains 'synced 6 local session(s)' "$out" "2. six peers imported"
+assert_contains 'synced 7 local session(s)' "$out" "2. seven peers imported"
 assert_absent 'pilot-mac' "$(orch list --json | grep '"name"')" "2. pilot never becomes a target"
 listing=$(orch list)
 assert_contains 'session_01WORKSPACEWORKSPACE0001' "$listing" "2. interactive bridge id read from sessions/<pid>.json"
@@ -104,6 +106,10 @@ orch assign "write changelog" C-01 >/dev/null
 out=$(orch report)
 assert_contains '4 open order(s)' "$out" "7. open orders counted whatever the harness state"
 assert_contains 'WORKING      refactor auth  working · order R-01 since' "$out" "7. a working target still shows its order"
+assert_contains 'EXITED       old investigation  blocked: provide the API key · ' "$out" "7. a job whose process is gone is exited, whatever its last state"
+assert_contains 'ago · claude rm e0e0e0e0 to clear' "$out" "7. exited job dated with the command that clears it"
+assert_absent 'NEEDS INPUT  old investigation' "$out" "7. nobody can answer a dead job: not counted as needing input"
+assert_contains '2 need input' "$out" "7. only live sessions counted as needing input"
 assert_contains '→ resolve it' "$out" "7. a finished target with an open order asks for its verdict"
 assert_contains 'NEEDS INPUT  deploy staging  blocked: approve the terraform apply (permission prompt)' "$out" "7. blocked session first, with its own reason and the harness one"
 assert_contains 'WORKING      refactor auth' "$out" "7. working session listed"

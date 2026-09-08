@@ -95,8 +95,11 @@ orchestrator.py report
 ```
 The report is computed from the harness at the moment it runs: **NEEDS INPUT** (a permission
 prompt, a question — with the `needs` text the session wrote), **WORKING**, **OPEN ORDER** (tag,
-age, live state), **FINISHED** (with `output.result`), then remote and offline targets and any
-target without an id. A blocked session is reported the moment it is seen, never waited on:
+age, live state), **FINISHED** (with `output.result`), **EXITED** (a background job whose
+process is gone — its last state is history, not a request: nobody can answer a question asked
+in July; `claude rm` clears it, `claude respawn` revives it), then remote and offline targets
+and any target without an id. A background row without `pid` has no process: only a live
+process can need input or be working. A blocked session is reported the moment it is seen, never waited on:
 only the human unblocks it, from `claude agents` (Space to peek and reply, Enter to attach) or
 from claude.ai.
 

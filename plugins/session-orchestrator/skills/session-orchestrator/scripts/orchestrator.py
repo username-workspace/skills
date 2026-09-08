@@ -139,7 +139,7 @@ def live_view():
         if not local_id:
             continue
         entry = {"name": row.get("name"), "kind": row.get("kind"), "cwd": row.get("cwd"),
-                 "local_id": local_id, "state": row.get("state") or row.get("status") or "offline",
+                 "local_id": local_id, "alive": bool(row.get("pid")), "state": row.get("state") or row.get("status") or "offline",
                  "waiting_for": row.get("waitingFor"), "bridge_id": None, "needs": None, "result": None,
                  "updated_at": None}
         if background:
@@ -324,6 +324,8 @@ def cmd_list(args):
 
 def bucket(row):
     target, live = row["target"], row["live"]
+    if live is not None and not live["alive"] and live["kind"] == "background":
+        return "exited"
     if live is not None and (live.get("waiting_for") or live["state"] == "blocked"):
         return "input"
     if live is not None and live["state"] in ("working", "busy"):
@@ -353,11 +355,11 @@ def cmd_report(args):
     if pilot:
         print("pilot: %s" % pilot)
     open_orders = [r for r in rows if r["target"].get("status") == "busy"]
-    print("%d target(s) — %d need input, %d working, %d open order(s), %d finished"
+    print("%d target(s) — %d need input, %d working, %d open order(s), %d finished, %d exited"
           % (len(rows), len(groups.get("input", [])), len(groups.get("working", [])),
-             len(open_orders), len(groups.get("finished", []))))
+             len(open_orders), len(groups.get("finished", [])), len(groups.get("exited", []))))
     labels = (("input", "NEEDS INPUT"), ("working", "WORKING"), ("order", "OPEN ORDER"),
-              ("finished", "FINISHED"), ("attention", "ATTENTION"), ("ready", "ready"),
+              ("finished", "FINISHED"), ("exited", "EXITED"), ("attention", "ATTENTION"), ("ready", "ready"),
               ("remote", "remote"), ("offline", "offline"))
     for key, label in labels:
         for row in groups.get(key, []):
@@ -369,7 +371,7 @@ def cmd_report(args):
                 extra = "%s %s %s" % (target.get("verdict"), target.get("tag", "-"), target.get("note", ""))
             elif key == "ready":
                 extra = "last %s %s" % (target.get("verdict", "-"), age(target.get("resolved_at")))
-            elif key == "finished" and row["live"].get("updated_at"):
+            elif key in ("finished", "exited") and row["live"].get("updated_at"):
                 extra = "%s · %s ago · claude rm %s to clear" % (row["harness"], age(row["live"]["updated_at"]), target.get("local_id"))
             else:
                 extra = row["harness"]
