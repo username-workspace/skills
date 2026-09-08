@@ -27,7 +27,7 @@
       "name": "session-orchestrator",
       "version": "1.0.0",
       "source": "./plugins/session-orchestrator",
-      "description": "Make one Claude Code session the orchestrator of all the others, on top of the harness's own multi-session features (agent view and background sessions, cross-session messaging, Remote Control, run logs): inventory from `claude agents --json`, one tagged order per target, native `claude --bg` dispatch when no session fits, the harness's state files for what each session did or needs, and one aggregated report. The registry keeps only what the harness has no notion of — orders and remote targets — and refuses the two orders that make a run log unreadable.",
+      "description": "Make one Claude Code session the orchestrator of all the others, on top of the harness's own multi-session features (agent view and background sessions, cross-session messaging, Remote Control, run logs): inventory from `claude agents --json`, one tagged order per target, native `claude --bg` dispatch when no session fits, the harness's state files for what each session did or needs, and one aggregated report. The registry keeps only what the harness has no notion of — orders and remote targets — and refuses the two orders that make a run log unreadable. The report stays short by default — only what needs a decision is spelled out, the rest is one line per group — and points at `claude agents` for the live screen rather than competing with it.",
       "category": "development",
       "homepage": "https://github.com/username-workspace/skills/tree/main/plugins/session-orchestrator"
     },

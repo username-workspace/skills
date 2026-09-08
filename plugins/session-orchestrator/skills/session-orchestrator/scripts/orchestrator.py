@@ -14,6 +14,7 @@ import sys
 from datetime import datetime, timezone
 
 VERDICTS = ("ok", "error", "blocked", "timeout")
+ACTIONABLE = ("input", "order", "attention")
 FIELDS = ("bridge_id", "local_id", "machine", "cwd", "role", "note")
 ISO = "%Y-%m-%dT%H:%M:%SZ"
 
@@ -358,31 +359,42 @@ def cmd_report(args):
     print("%d target(s) — %d need input, %d working, %d open order(s), %d finished, %d exited"
           % (len(rows), len(groups.get("input", [])), len(groups.get("working", [])),
              len(open_orders), len(groups.get("finished", [])), len(groups.get("exited", []))))
-    labels = (("input", "NEEDS INPUT"), ("working", "WORKING"), ("order", "OPEN ORDER"),
-              ("finished", "FINISHED"), ("exited", "EXITED"), ("attention", "ATTENTION"), ("ready", "ready"),
-              ("remote", "remote"), ("offline", "offline"))
+    labels = (("input", "NEEDS INPUT"), ("order", "OPEN ORDER"), ("attention", "ATTENTION"),
+              ("working", "working"), ("finished", "finished"), ("exited", "exited"),
+              ("ready", "ready"), ("remote", "remote"), ("offline", "offline"))
     for key, label in labels:
-        for row in groups.get(key, []):
+        group = groups.get(key, [])
+        if not group:
+            continue
+        if key not in ACTIONABLE and not args.all:
+            names = ", ".join(r["target"].get("name", "?") for r in group)
+            print("  %-12s %-3d %s" % (label, len(group), shorten(names, 90)))
+            continue
+        for row in group:
             target = row["target"]
-            extra = ""
             if key == "order":
                 extra = "%s since %s — harness: %s" % (target.get("tag"), age(target.get("assigned_at")), row["harness"])
             elif key == "attention":
                 extra = "%s %s %s" % (target.get("verdict"), target.get("tag", "-"), target.get("note", ""))
             elif key == "ready":
                 extra = "last %s %s" % (target.get("verdict", "-"), age(target.get("resolved_at")))
-            elif key in ("finished", "exited") and row["live"].get("updated_at"):
-                extra = "%s · %s ago · claude rm %s to clear" % (row["harness"], age(row["live"]["updated_at"]), target.get("local_id"))
             else:
                 extra = row["harness"]
+                if row["live"] and row["live"].get("updated_at"):
+                    extra += " · %s ago" % age(row["live"]["updated_at"])
             if key != "order" and target.get("status") == "busy":
                 extra += " · order %s since %s" % (target.get("tag"), age(target.get("assigned_at")))
-                if key == "finished":
+                if key in ("finished", "exited"):
                     extra += " → resolve it"
-            print(("  %-12s %s  %s" % (label, target.get("name"), extra)).rstrip())
-    for row in rows:
-        if not row["bridge_id"]:
-            print("  %-12s %s — no claude.ai id, get_run_log cannot read it" % ("NO ID", row["target"].get("name")))
+            print(("  %-12s %s  %s" % (label.upper(), target.get("name"), shorten(extra, 90))).rstrip())
+    dead = [r["target"].get("local_id") for r in groups.get("exited", []) if r["target"].get("local_id")]
+    if dead and not args.all:
+        print("  clear them:  claude rm %s" % " ".join(dead))
+    unreadable = [r["target"].get("name") for r in rows if not r["bridge_id"]]
+    if unreadable:
+        print("  %-12s %-3d %s — no claude.ai id, get_run_log cannot read them"
+              % ("no id", len(unreadable), shorten(", ".join(unreadable), 60)))
+    print("  the live screen:  claude agents   (peek with space, reply, attach, stop)")
     return 0
 
 
@@ -424,6 +436,7 @@ def main(argv):
 
     report = sub.add_parser("report", help="what needs input, what works, what finished")
     report.add_argument("--json", action="store_true")
+    report.add_argument("--all", action="store_true", help="detail every group, not only the actionable ones")
     report.set_defaults(func=cmd_report)
 
     args = parser.parse_args(argv)

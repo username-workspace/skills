@@ -9,7 +9,12 @@
     "Reads back on evidence — state.json, claude logs, RemoteTrigger get_run_log — and reports a blocked session the moment it is seen instead of waiting on it",
     "Refuses a second order on a busy target and a tag already running elsewhere, so an order is never read mid-turn and a verdict never lands on the wrong task",
     "Keeps permissions where they belong: an order is never consent, and work denied in the orchestrator is never routed to a peer",
-    "Registry per Claude account under its own config directory; degrades to the registry alone, with a warning, when the claude binary is unreachable"
+    "Registry per Claude account under its own config directory; degrades to the registry alone, with a warning, when the claude binary is unreachable",
+    "Reports short by default: decisions spelled out, everything else one line per group, with a ready-to-paste cleanup command and a pointer to claude agents for the live screen"
   ],
-  "platforms": ["macOS", "Linux", "Windows"]
+  "platforms": [
+    "macOS",
+    "Linux",
+    "Windows"
+  ]
 }

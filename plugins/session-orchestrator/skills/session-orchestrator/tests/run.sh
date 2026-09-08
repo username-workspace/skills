@@ -105,22 +105,31 @@ orch assign "refactor auth" R-01 >/dev/null
 orch assign "write changelog" C-01 >/dev/null
 out=$(orch report)
 assert_contains '4 open order(s)' "$out" "7. open orders counted whatever the harness state"
-assert_contains 'WORKING      refactor auth  working · order R-01 since' "$out" "7. a working target still shows its order"
-assert_contains 'EXITED       old investigation  blocked: provide the API key · ' "$out" "7. a job whose process is gone is exited, whatever its last state"
-assert_contains 'ago · claude rm e0e0e0e0 to clear' "$out" "7. exited job dated with the command that clears it"
-assert_absent 'NEEDS INPUT  old investigation' "$out" "7. nobody can answer a dead job: not counted as needing input"
 assert_contains '2 need input' "$out" "7. only live sessions counted as needing input"
-assert_contains '→ resolve it' "$out" "7. a finished target with an open order asks for its verdict"
+assert_contains '1 exited' "$out" "7. exited job counted"
+assert_absent 'NEEDS INPUT  old investigation' "$out" "7. nobody can answer a dead job: not counted as needing input"
 assert_contains 'NEEDS INPUT  deploy staging  blocked: approve the terraform apply (permission prompt)' "$out" "7. blocked session first, with its own reason and the harness one"
-assert_contains 'WORKING      refactor auth' "$out" "7. working session listed"
-assert_contains 'OPEN ORDER   workspace  T02 since' "$out" "7. open order with its age"
-assert_contains 'FINISHED     write changelog  done: CHANGELOG.md updated, 12 entries · ' "$out" "7. finished session with its result"
-assert_contains 'ago · claude rm d0d0d0d0 to clear' "$out" "7. finished session dated, with the command that clears it"
 assert_contains 'NEEDS INPUT  reviewer  waiting: input needed' "$out" "7. interactive session waiting for input reported"
-assert_contains 'remote       pi-lab' "$out" "7. other-machine target has no harness view"
-assert_contains 'offline      ghost' "$out" "7. local target gone from the harness is offline"
-assert_contains 'NO ID        ghost' "$out" "7. target without a claude.ai id flagged unreadable"
-assert_absent 'NO ID        pi-lab' "$out" "7. remote target with an id is readable"
+assert_contains 'OPEN ORDER   workspace  T02 since' "$out" "7. open order with its age"
+assert_contains 'finished     1   write changelog' "$out" "7. finished session summarised, not spelled out"
+assert_contains 'remote       1   pi-lab' "$out" "7. other-machine target has no harness view"
+assert_contains 'offline      1   ghost' "$out" "7. local target gone from the harness is offline"
+assert_contains 'no id        3   builder, ghost, reviewer' "$out" "7. targets without a claude.ai id named once, pi-lab excluded"
+
+# 7b. by default only what needs a decision is detailed; the rest is one line per group
+assert_contains 'exited       1   old investigation' "$out" "7b. exited summarised on one line with its name"
+assert_contains 'clear them:  claude rm e0e0e0e0' "$out" "7b. ready-to-paste cleanup command"
+assert_contains 'claude agents' "$out" "7b. points at the harness screen for the live view"
+assert_absent 'blocked: provide the API key' "$out" "7b. dead job's stale reason not spelled out by default"
+assert_eq 13 "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "7b. the whole report fits in 13 lines for 9 targets"
+
+# 7c. --all details every group
+out=$(orch report --all)
+assert_contains 'EXITED       old investigation  blocked: provide the API key · ' "$out" "7c. --all spells out the dead job's last state"
+assert_contains 'FINISHED     write changelog  done: CHANGELOG.md updated, 12 entries · ' "$out" "7c. --all spells out the finished result"
+assert_contains 'WORKING      refactor auth  working · order R-01 since' "$out" "7c. --all shows a working target with its order"
+assert_contains '→ resolve it' "$out" "7c. a finished target with an open order asks for its verdict"
+assert_absent 'clear them:' "$out" "7c. --all lists the jobs themselves, no summary command"
 
 # 8. harness unavailable → the registry still answers, with a warning, exit 0
 out=$(CLAUDE_CODE_EXECPATH="$ROOT/bin/missing" orch list); code=$?

@@ -93,10 +93,15 @@ for it. Never route work to a peer because it was denied here — route it back 
 ```
 orchestrator.py report
 ```
-The report is computed from the harness at the moment it runs: **NEEDS INPUT** (a permission
-prompt, a question — with the `needs` text the session wrote), **WORKING**, **OPEN ORDER** (tag,
-age, live state), **FINISHED** (with `output.result`), **EXITED** (a background job whose
-process is gone — its last state is history, not a request: nobody can answer a question asked
+Computed from the harness at the moment it runs, and **short on purpose**: only what needs a
+decision is spelled out — **NEEDS INPUT** (a permission prompt, a question, with the `needs` text
+the session wrote), **OPEN ORDER** (tag, age, live state) and **ATTENTION** (a verdict that was
+not `ok`). Every other group is one line with its count and names: working, finished, exited,
+ready, remote, offline, plus the targets no `get_run_log` can read. `--all` spells them all out.
+The live screen is the harness's own — `claude agents` — and the report ends by saying so.
+
+The groups behind those counts: **FINISHED** (with `output.result`), **EXITED** (a background job
+whose process is gone — its last state is history, not a request: nobody can answer a question asked
 in July; `claude rm` clears it, `claude respawn` revives it), then remote and offline targets
 and any target without an id. A background row without `pid` has no process: only a live
 process can need input or be working. A blocked session is reported the moment it is seen, never waited on:
@@ -147,7 +152,7 @@ Everything else — liveness, state, blocking reason, result — is read from th
 | `assign <name> <tag> [--note]` | record an order; refuses a busy target, a live tag, the orchestrator itself |
 | `resolve <name> <ok\|error\|blocked\|timeout> [--tag --note]` | close an order with its verdict |
 | `list [--json]` | registry joined with the live harness state |
-| `report [--json]` | needs input / working / open orders / finished / attention / remote / offline |
+| `report [--all] [--json]` | short by default: decisions detailed, the rest one line per group |
 | `forget <name>` | drop a target |
 
 Exit codes: `0` fine, `1` unknown target or bad usage, `2` an invariant refused the operation.
