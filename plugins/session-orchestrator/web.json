@@ -1,0 +1,15 @@
+{
+  "category": "Agents",
+  "tagline": "One session orchestrates every other Claude Code session you run, on top of the harness's own agent view.",
+  "summary": "Claude Code already runs sessions in parallel: agent view supervises background sessions, cross-session messaging lets them talk, Remote Control reaches other machines, and every session's state, blocking reason and result are written to disk. What is missing is the session that holds the picture and acts on it. session-orchestrator makes the current session that pilot. It takes inventory from claude agents --json, dispatches new work as native background sessions and orders to existing ones, reads the harness's own state files and run logs for what each target really did or needs, and prints one report: needs input, working, open orders, finished. Its registry holds only what the harness does not track — tagged orders with verdicts, and targets on other machines — and refuses a second order on a busy session, a tag already live elsewhere, or an order to itself.",
+  "capabilities": [
+    "Inventories this machine from claude agents --json --all and enriches every row from the harness's own files: claude.ai ids for get_run_log, the blocking reason and the final result of background sessions",
+    "Recognises itself through CLAUDE_CODE_SESSION_ID, so the orchestrator can never become one of its own targets",
+    "Dispatches new independent work as native background sessions (claude --bg, worktree-isolated, visible in agent view) and tagged orders to existing sessions over SendMessage, with an idle notice instead of polling",
+    "Reads back on evidence — state.json, claude logs, RemoteTrigger get_run_log — and reports a blocked session the moment it is seen instead of waiting on it",
+    "Refuses a second order on a busy target and a tag already running elsewhere, so an order is never read mid-turn and a verdict never lands on the wrong task",
+    "Keeps permissions where they belong: an order is never consent, and work denied in the orchestrator is never routed to a peer",
+    "Registry per Claude account under its own config directory; degrades to the registry alone, with a warning, when the claude binary is unreachable"
+  ],
+  "platforms": ["macOS", "Linux", "Windows"]
+}
