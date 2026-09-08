@@ -119,8 +119,10 @@ orchestrator.py resolve workspace ok --tag WS-01
 orchestrator.py resolve builder blocked --tag B-02 --note "permission on ~/src/infra"
 ```
 Verdicts: `ok`, `error`, `blocked`, `timeout`. A verdict on a tag the target is not running is
-refused. For a background session, the harness's `done` / `failed` is the ground truth — resolve
-from it, not from the session's prose. Stop what is finished (`claude stop <id>`, `claude rm <id>`
+refused. Two truths, never one: the harness state says whether the session **finished** (`done`,
+`failed`, `blocked`), the sentinel `END <TAG> OK | ERROR` says whether the **order** succeeded.
+A `done` session whose sentinel reads `ERROR` is an `error` — verified: a gate-runner ended
+`done` with a reassuring summary while its sentinel reported a red suite. Stop what is finished (`claude stop <id>`, `claude rm <id>`
 once its worktree is merged or discarded): a fleet nobody prunes becomes a list nobody reads.
 
 Report to the user what targets **did** — tools, files, errors seen in the log — not what they
