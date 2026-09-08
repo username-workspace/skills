@@ -30,6 +30,7 @@ cat > "$STUB_AGENTS" <<'JSON'
 [
  {"pid":501,"kind":"interactive","status":"busy","name":"pilot-mac","cwd":"/Users/me","sessionId":"56cf0730-0000-4000-8000-000000000501","startedAt":1},
  {"pid":502,"kind":"interactive","status":"idle","name":"workspace","cwd":"/Users/me/src/app","sessionId":"9192c7ef-0000-4000-8000-000000000502","startedAt":2},
+ {"pid":504,"kind":"interactive","status":"busy","name":"builder","cwd":"/Users/me/src/infra","sessionId":"bbbb0000-0000-4000-8000-000000000504","startedAt":8},
  {"pid":503,"kind":"interactive","status":"waiting","waitingFor":"input needed","name":"reviewer","cwd":"/Users/me/src/app","sessionId":"aaaa0000-0000-4000-8000-000000000503","startedAt":9},
  {"id":"ab12cd34","kind":"background","state":"working","status":"busy","name":"refactor auth","cwd":"/Users/me/src/app","sessionId":"ab12cd34-0000-4000-8000-000000000001","startedAt":3},
  {"id":"ff00ff00","kind":"background","state":"blocked","status":"waiting","waitingFor":"permission prompt","name":"deploy staging","cwd":"/Users/me/src/infra","sessionId":"ff00ff00-0000-4000-8000-000000000002","startedAt":4},
@@ -53,7 +54,7 @@ assert_eq 0 "$code" "1. empty registry exits 0"
 
 # 2. sync → every local session imported with the id the harness gives it, the pilot excluded
 out=$(orch sync)
-assert_contains 'synced 5 local session(s)' "$out" "2. five peers imported"
+assert_contains 'synced 6 local session(s)' "$out" "2. six peers imported"
 assert_absent 'pilot-mac' "$(orch list --json | grep '"name"')" "2. pilot never becomes a target"
 listing=$(orch list)
 assert_contains 'session_01WORKSPACEWORKSPACE0001' "$listing" "2. interactive bridge id read from sessions/<pid>.json"
@@ -83,6 +84,12 @@ out=$(orch assign pilot-mac T09); code=$?
 assert_eq 2 "$code" "5. assigning the pilot refused"
 assert_contains 'this session' "$out" "5. refusal explains why"
 
+# 5b. an order to a busy interactive session is accepted but warned: it will be read mid-turn
+out=$(orch assign builder B-01); code=$?
+assert_eq 0 "$code" "5b. busy interactive target still accepts the order"
+assert_contains 'busy right now' "$out" "5b. warning says it will be read mid-turn"
+assert_absent 'busy right now' "$(orch assign workspace T05 2>&1; orch resolve workspace ok --tag T05 >/dev/null 2>&1)" "5b. no warning on an idle target"
+
 # 6. resolve → wrong tag refused, right tag frees the target
 out=$(orch resolve workspace ok --tag T99); code=$?
 assert_eq 2 "$code" "6. verdict for another tag refused"
@@ -92,7 +99,12 @@ assert_eq 0 "$(orch assign workspace T02 >/dev/null 2>&1; echo $?)" "6. freed ta
 # 7. report → harness buckets first, then orders, then registry-only knowledge
 orch add pi-lab --machine pi --bridge-id session_01PILABPILABPILABPILAB01 >/dev/null
 orch add ghost --machine "$(hostname -s)" >/dev/null
+orch assign "refactor auth" R-01 >/dev/null
+orch assign "write changelog" C-01 >/dev/null
 out=$(orch report)
+assert_contains '4 open order(s)' "$out" "7. open orders counted whatever the harness state"
+assert_contains 'WORKING      refactor auth  working · order R-01 since' "$out" "7. a working target still shows its order"
+assert_contains '→ resolve it' "$out" "7. a finished target with an open order asks for its verdict"
 assert_contains 'NEEDS INPUT  deploy staging  blocked: approve the terraform apply (permission prompt)' "$out" "7. blocked session first, with its own reason and the harness one"
 assert_contains 'WORKING      refactor auth' "$out" "7. working session listed"
 assert_contains 'OPEN ORDER   workspace  T02 since' "$out" "7. open order with its age"

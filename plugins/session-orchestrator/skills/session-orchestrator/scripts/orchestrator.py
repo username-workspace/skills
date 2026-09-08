@@ -237,10 +237,15 @@ def cmd_assign(args):
     if holder is not None:
         die("tag %s is already running on %s — one tag identifies one order" % (args.tag, holder["name"]), 2)
     entry = upsert(data, args.name)
-    if is_self(entry.get("local_id"), entry.get("bridge_id")) or args.name == pilot_name(live_view()):
+    view = live_view()
+    if is_self(entry.get("local_id"), entry.get("bridge_id")) or args.name == pilot_name(view):
         die("%s is this session — the orchestrator dispatches orders, it does not receive them" % args.name, 2)
     if entry.get("status") == "busy" and entry.get("tag") != args.tag:
         die("%s is still running %s — resolve it before sending another order" % (args.name, entry["tag"]), 2)
+    live = live_for(view, entry)
+    if live is not None and live["kind"] == "interactive" and live["state"] == "busy":
+        sys.stderr.write("warning: %s is busy right now — the order will be read mid-turn, inside its current task; "
+                         "prefer an idle session or `claude --bg`\n" % args.name)
     entry["status"] = "busy"
     entry["tag"] = args.tag
     entry["assigned_at"] = now()
@@ -323,10 +328,10 @@ def bucket(row):
         return "input"
     if live is not None and live["state"] in ("working", "busy"):
         return "working"
-    if target.get("status") == "busy":
-        return "order"
     if live is not None and live["state"] in ("done", "failed"):
         return "finished"
+    if target.get("status") == "busy":
+        return "order"
     if target.get("verdict") in ("error", "blocked", "timeout"):
         return "attention"
     if live is None:
@@ -347,9 +352,10 @@ def cmd_report(args):
     pilot = pilot_name(view)
     if pilot:
         print("pilot: %s" % pilot)
+    open_orders = [r for r in rows if r["target"].get("status") == "busy"]
     print("%d target(s) — %d need input, %d working, %d open order(s), %d finished"
           % (len(rows), len(groups.get("input", [])), len(groups.get("working", [])),
-             len(groups.get("order", [])), len(groups.get("finished", []))))
+             len(open_orders), len(groups.get("finished", []))))
     labels = (("input", "NEEDS INPUT"), ("working", "WORKING"), ("order", "OPEN ORDER"),
               ("finished", "FINISHED"), ("attention", "ATTENTION"), ("ready", "ready"),
               ("remote", "remote"), ("offline", "offline"))
@@ -367,6 +373,10 @@ def cmd_report(args):
                 extra = "%s · %s ago · claude rm %s to clear" % (row["harness"], age(row["live"]["updated_at"]), target.get("local_id"))
             else:
                 extra = row["harness"]
+            if key != "order" and target.get("status") == "busy":
+                extra += " · order %s since %s" % (target.get("tag"), age(target.get("assigned_at")))
+                if key == "finished":
+                    extra += " → resolve it"
             print(("  %-12s %s  %s" % (label, target.get("name"), extra)).rstrip())
     for row in rows:
         if not row["bridge_id"]:

@@ -75,6 +75,9 @@ combined with `-p`. For a session the user must also drive from their phone, use
 orchestrator.py assign workspace WS-01 --note "run the polaris gate"
 SendMessage({to: "workspace", message: <envelope: TAG, instruction, sentinel END WS-01 OK|ERROR, callback to the orchestrator>, notify_when_idle: true})
 ```
+Check the harness first: an interactive session that is `busy` reads the order between two
+tool calls, **inside the user's current task**, and answers from there — verified. Prefer an idle
+session or a background one; `assign` warns when the target is busy.
 `notify_when_idle` brings back one notice when a session **on this machine** goes idle — no
 polling. Across machines it is refused; ask for the callback in the envelope instead. `assign`
 refuses a second order on a busy target and refuses reusing a live tag — a target reads messages
@@ -152,7 +155,8 @@ answers with a warning.
   backgrounded (`/bg`, or `←` on an empty prompt); `ListAgents` still sees it.
 - `claude logs` needs the background service alive; a job left from a previous boot answers
   *connect ENOENT* — its `state.json` and `get_run_log` still work.
-- Replying to a message means copying its `from="bridge:…"` attribute as the recipient; a session
+- Replying to a message means copying its `from=` attribute as the recipient —
+  `bridge:session_01…` from another machine, `uds:/tmp/cc-socks/<pid>.sock` on this one; a session
   **title** is not an address (*No agent named … is reachable*).
 - The `[ref]` shown by `ListAgents` differs per listing session — address by name, never store it.
 - Sessions beyond this machine are listed newest first over a bounded number of pages: an old one
