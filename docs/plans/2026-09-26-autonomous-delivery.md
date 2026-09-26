@@ -1,8 +1,10 @@
 # Autonomous Delivery: design and plan
 
-> **Status: Accepted** (2026-09-26). Decisions D1 to D5 approved by Benjamin with the go for Phase 1;
-> D6 to D8 are defaults, open to veto. Revision 8 after seven fresh-eyes merge-review passes (see
-> "Review log" at the end).
+> **Status: Accepted as the Phase 1 working plan** (2026-09-26). Decisions D1 to D5 approved by
+> Benjamin with the go for Phase 1; D6 to D8 are defaults, open to veto. Revision 8, after eight
+> fresh-eyes merge-review passes; merged by Benjamin's decision after the last one (25/100), with its
+> three findings carried as **Open questions for Phase 1** below. Phase 1 settles them in code, each
+> with a failing test first, and its PRs are reviewed pass by pass.
 
 **Goal:** a need stated once is driven to an end state with no human intervention: **`ready`** (a
 reviewed PR/MR, green at its exact head sha, handed to a human) by default, or **`delivered`**
@@ -343,6 +345,37 @@ never advances past a human prompt it has not classified, so a missed halt canno
 | Skills calling skills | an instruction that names the skill; the skill's driven-mode section limits it to judgment | F4 |
 | A sibling plugin missing | impossible for the four core siblings (declared `dependencies`); a disabled one fails the contract at `open` | F7 |
 
+## Open questions for Phase 1
+
+Raised by review pass 8 on revision 8, attested, not yet designed away. Phase 1 must close each with a
+failing test before the code that fixes it.
+
+1. **Conductor liveness, not a SessionStart stamp.** A stamp written once at SessionStart survives
+   `/reload-plugins` and `--continue` (same session id, same `CLAUDE_PID`), so a disabled conductor
+   could still silence the siblings. Proposed: every conductor hook refreshes a per-session liveness
+   stamp with the current `prompt_id` and `CLAUDE_PID`; `driven()` requires a stamp for the current
+   prompt (UserPromptSubmit callers accept the previous prompt's). A conductor that stops running stops
+   refreshing it, and the siblings re-engage by the next prompt.
+2. **Sessions outside the conductor's scope on a driven branch.** Gating `driven()` on the scope stamp
+   freed a `$HOME` session (explicit mode, engaging on the repo-wide `mark-done` marker the conductor
+   writes) to commit, push and open the driven need's PR. Proposed: the gate depends on the conductor
+   running, never on the session's scope; the conductor writes its liveness stamp in every session and
+   its out-of-scope mode is silent, not absent. Test: a second session outside the scope stands down.
+3. **A driven review in fresh-eyes mode.** merge-review's default reviewer is a background subagent;
+   its `background_tasks` entry has no `command`, so the waiting rule does not see it and three Stops
+   trip the no-progress breaker at every review. Proposed: the skill step's own subagents count as the
+   need's background step (need token in the Agent description, matched in
+   `background_tasks[].description` for subagent tasks, to verify), or the "When driven" section runs
+   the review in the foreground. Turn-simulator case.
+
+Also from pass 8, to settle while implementing: merge-review's script-path stamp is written only with
+`prepush_gate` on and doubles as ship-when-done's push-hold signal, so presence and enablement need
+separate stamps; cron availability is checked at `open` (`CLAUDE_CODE_DISABLE_CRON`) and confirmed
+through `session_crons` at the first wait; `--need` goes near the start of an instructed command (the
+`command` field is capped at 1000 characters) and `watch.py run` and `ship.py gate` accept it; the first
+need's branch starts from the base, and a prompt may name pre-existing changes for the need to adopt; a
+follow-up on a `ready` need that arrives while another need is in flight is queued.
+
 ## Review log
 
 Each revision was scored by a fresh-eyes merge-review subagent that had not seen the discussion.
@@ -356,6 +389,7 @@ Each revision was scored by a fresh-eyes merge-review subagent that had not seen
 | 5 | 75/100 | `abandon` handing the branch back to AUTO siblings that would still review, push and ship the abandoned work | 6 |
 | 6 | 75/100 | "waiting" keyed on any background task, so an unrelated dev server could stall a need or disable the breaker | 7 |
 | 7 | 50/100 | a ledger left by a disabled conductor silencing every sibling; an abandoned need's uncommitted work carried into the next need | 8 |
+| 8 | 25/100 | a SessionStart stamp is not liveness; out-of-scope sessions freed on a driven branch; a fresh-eyes review subagent tripping the breaker | Open questions for Phase 1 |
 
 Revision 3 also adopted `asyncRewake` as a candidate re-entry, `fcntl.flock` instead of a stale-lock
 timeout, archived closed needs, `score ≥ threshold` in the review record, `--auto-merge=false` and
