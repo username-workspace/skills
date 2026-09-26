@@ -9,7 +9,7 @@ The Stop hook only nudges the session to launch it (a `block` continuation, once
 Read-only: it never commits, pushes, or merges, and runs no model itself. Opt a repo out with
 enabled:false.
 """
-import argparse, json, os, re, sys, time
+import argparse, json, os, sys, time
 from datetime import datetime, timezone
 from shutil import which
 from urllib.parse import quote
@@ -96,15 +96,14 @@ def ci_status(repo, forge, branch):
             return "none"
         return {8: "pending"}.get(rc, "failed" if rc == 1 else "none" if rc == 0 else "error")
     if forge == "gitlab":
-        latest = gitlab_pipelines(repo, f"ref={quote(branch, safe='')}&per_page=1")
-        if not latest:
-            return "none" if latest == [] else "error"
-        return ci_status_at(repo, forge, latest[0].get("sha") or "", branch)
+        head = gitlab_branch_head(repo, branch)
+        if head is None:
+            return "error"
+        return ci_status_at(repo, forge, head, branch) if head else "none"
     return "error"
 
 
 GITLAB_RED = ("failed", "canceled")
-GITLAB_FINAL_OK = ("success", "skipped", "manual")
 
 
 def gitlab_pipelines(repo, query):
@@ -119,19 +118,65 @@ def gitlab_pipelines(repo, query):
     return arr if isinstance(arr, list) else None
 
 
-def gitlab_branch_pipelines(repo, sha, branch):
-    """The GitLab twin of a commit's latest check runs: pipelines of this exact sha on the branch or an
-    MR ref, the newest per ref (a re-run supersedes). Other refs sharing the sha — security-policy,
-    workload, tag pipelines — are not this branch's verdict."""
+def glab_json(repo, path):
+    rc, out, _ = run(["glab", "api", path], repo)
+    if rc != 0:
+        return None
+    try:
+        return json.loads(out or "null")
+    except Exception:
+        return None
+
+
+def gitlab_open_mr(repo, branch):
+    """The branch's open MR with its head pipeline; {} when there is none, None on an API error."""
+    arr = glab_json(repo, f"projects/:id/merge_requests?source_branch={quote(branch, safe='')}&state=opened&per_page=1")
+    if not isinstance(arr, list):
+        return None
+    if not arr:
+        return {}
+    mr = glab_json(repo, f"projects/:id/merge_requests/{arr[0].get('iid')}")
+    return mr if isinstance(mr, dict) else None
+
+
+def gitlab_branch_head(repo, branch):
+    """The sha the branch's CI verdict is about: the open MR's head, else the newest branch pipeline's."""
+    mr = gitlab_open_mr(repo, branch)
+    if mr is None:
+        return None
+    if mr:
+        return mr.get("sha") or ""
+    arr = gitlab_pipelines(repo, f"ref={quote(branch, safe='')}&per_page=20")
+    if arr is None:
+        return None
+    return next((p.get("sha") or "" for p in arr if p.get("ref") == branch), "")
+
+
+def gitlab_gating_pipelines(repo, sha, branch):
+    """The pipelines that decide `sha`'s verdict; None on an API error.
+    With an open MR, GitLab's own gate: the MR's head pipeline (branch, detached, merged-results or
+    train), once it belongs to `sha`. A merged-results or train pipeline runs on a merge commit whose
+    parents include `sha`, so its own sha never equals it. Without an MR, the branch pipelines of `sha`,
+    newest first (a re-run supersedes); pipelines of other refs sharing the sha are not its verdict."""
+    mr = gitlab_open_mr(repo, branch)
+    if mr is None:
+        return None
+    if mr:
+        hp = mr.get("head_pipeline")
+        if mr.get("sha") != sha or not hp:
+            return []
+        if hp.get("sha") == sha:
+            return [hp]
+        commit = glab_json(repo, f"projects/:id/repository/commits/{hp.get('sha')}")
+        if not isinstance(commit, dict):
+            return None
+        return [hp] if sha in (commit.get("parent_ids") or []) else []
     arr = gitlab_pipelines(repo, f"sha={sha}&per_page=100")
     if arr is None:
         return None
-    latest = {}
-    for p in sorted(arr, key=lambda p: p.get("id") or 0):
-        ref = str(p.get("ref") or "")
-        if p.get("sha") == sha and (ref == branch or ref.startswith("refs/merge-requests/")):
-            latest[ref] = p
-    return list(latest.values())
+    mine = sorted((p for p in arr if p.get("sha") == sha and p.get("ref") == branch),
+                  key=lambda p: p.get("id") or 0)
+    return mine[-1:]
 
 
 def ci_status_at(repo, forge, sha, branch):
@@ -154,7 +199,7 @@ def ci_status_at(repo, forge, sha, branch):
             return "pending"
         return "success"
     if forge == "gitlab":
-        pipes = gitlab_branch_pipelines(repo, sha, branch)
+        pipes = gitlab_gating_pipelines(repo, sha, branch)
         if pipes is None:
             return "error"
         if not pipes:
@@ -162,7 +207,7 @@ def ci_status_at(repo, forge, sha, branch):
         states = [(p.get("status") or "").lower() for p in pipes]
         if any(st in GITLAB_RED for st in states):
             return "failed"
-        if all(st in GITLAB_FINAL_OK for st in states):
+        if all(st == "success" for st in states):
             return "success"
         return "pending"
     return "error"
@@ -183,11 +228,9 @@ def failing_log(repo, forge, branch, sha=None):
             return log
         return ""
     if forge == "gitlab":
-        if not sha:
-            latest = gitlab_pipelines(repo, f"ref={quote(branch, safe='')}&per_page=1") or [{}]
-            sha = latest[0].get("sha") or ""
+        sha = sha or gitlab_branch_head(repo, branch) or ""
         logs = []
-        for p in gitlab_branch_pipelines(repo, sha, branch) or []:
+        for p in gitlab_gating_pipelines(repo, sha, branch) or []:
             if (p.get("status") or "").lower() not in GITLAB_RED:
                 continue
             _, out, _ = run(["glab", "api", f"projects/:id/pipelines/{p['id']}/jobs?scope[]=failed&per_page=100"], repo)

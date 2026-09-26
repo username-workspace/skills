@@ -116,10 +116,13 @@ status and logs. The fix runs in your interactive session.
 - It opens no MR and merges nothing — it's the CI-watch step after **ship-when-done** (which pushes and
   opens the MR once **merge-review** has passed) for the full open → review → green → (you merge) chain.
 - The verdict belongs to the exact commit being watched, read from structured forge data — never a
-  CLI's human output: on GitHub the commit's latest check runs; on GitLab the pipelines of that sha on
-  the branch or its MR refs, newest per ref (`failed`/`canceled` red; `success`/`skipped`/`manual`
-  final). Pipelines of other refs sharing the sha (security policy, workloads) are not its verdict. On
-  red, the log is the failed jobs' traces (allowed-to-fail jobs excluded). Nothing registered yet for
-  the sha → `none`, and the watcher keeps polling rather than guessing.
+  CLI's human output: on GitHub the commit's latest check runs; on GitLab, when the branch has an open
+  MR, the MR's head pipeline (GitLab's own merge gate, whether branch, detached, merged-results or
+  merge-train), once it belongs to the watched sha (a merged-results pipeline runs on a merge commit
+  whose parents include it); without an MR, the newest branch pipeline of that sha. Only `success` is
+  green, `failed`/`canceled` red, anything else keeps polling. Pipelines of other refs sharing the sha
+  (security policy, workloads) are never its verdict. On red, the log is the gating pipeline's failed
+  job traces (allowed-to-fail jobs excluded). Nothing registered yet for the sha → `none`, and the
+  watcher keeps polling rather than guessing.
 - Delivery rides the harness: the watcher is a background task **your session launched**, so its verdict
   re-invokes that session when it resolves. The only remote dependency in the whole chain lives here.

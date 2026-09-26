@@ -62,6 +62,9 @@ PY
        *"/jobs?"*)  if [ -n "${STUB_GL_JOBS:-}" ]; then cat "$STUB_GL_JOBS"
                     else echo '[{"id":7,"name":"test","status":"failed","allow_failure":false}]'; fi;;
        */jobs/*/trace) echo "JOB ${2//[^0-9]/} FAILED: AssertionError at app.py:7";;
+       *"/merge_requests?"*) if [ -n "${STUB_GL_MRS:-}" ]; then cat "$STUB_GL_MRS"; else echo '[]'; fi;;
+       */merge_requests/*) cat "${STUB_GL_MR:-/dev/null}";;
+       */repository/commits/*) cat "${STUB_GL_COMMIT:-/dev/null}";;
        *) echo '[]';;
      esac;;
   *) exit 0;;
@@ -135,10 +138,8 @@ ck(at([{"id":9,"ref":"refs/workloads/abc","status":"success"},{"id":5,"ref":"fea
    "a newer pipeline of another ref on the same sha is not this branch's verdict")
 ck(at([{"id":5,"ref":"feat","status":"failed"},{"id":6,"ref":"feat","status":"success"}])=="success",
    "a re-run pipeline supersedes the failed one (latest per ref)")
-ck(at([{"id":2,"ref":"feat","status":"success"},{"id":3,"ref":"refs/merge-requests/4/head","status":"running"}])=="pending",
-   "the MR pipeline still running keeps the verdict pending")
-ck(at([{"id":2,"ref":"feat","status":"skipped"}])=="success", "skipped pipeline is final, not pending forever")
-ck(at([{"id":2,"ref":"feat","status":"manual"}])=="success", "manual (blocked) pipeline is final, not pending forever")
+ck(at([{"id":2,"ref":"feat","status":"skipped"}])!="success", "a skipped pipeline is never a green verdict")
+ck(at([{"id":2,"ref":"feat","status":"manual"}])!="success", "a manual (blocked) pipeline is never a green verdict")
 ck(at([{"id":2,"ref":"feat","status":"success","sha":"0"*40}])=="none", "a pipeline for another sha is no verdict")
 ck(at([])=="none", "no pipeline yet → none (keep polling)")
 json.dump([{"id":8,"ref":"feat","status":"success","sha":sha}], open(fx,"w"))
@@ -154,6 +155,34 @@ ck("JOB 7 FAILED" in log, "failing log = the failed job's trace")
 ck("JOB 31" not in log, "an allowed-to-fail job is not the failure")
 ck("INTERACTIVE-PICKER" not in log, "never the interactive glab ci trace")
 ck("JOB 7 FAILED" in watch.failing_log(R, "gitlab", "feat"), "branch-level failing log resolves the latest pipeline")
+# With an open MR, GitLab's own gate decides: the MR's head pipeline, whatever its kind. A merged-results
+# or train pipeline runs on a merge commit whose parents include the watched sha.
+d = os.path.dirname(R)
+mrs, mr, commit = (os.path.join(d, n) for n in ("mrs.json", "mr.json", "commit.json"))
+os.environ.update(STUB_GL_MRS=mrs, STUB_GL_MR=mr, STUB_GL_COMMIT=commit)
+def with_mr(mr_sha, hp, parents=()):
+    json.dump([{"iid": 4, "sha": mr_sha}], open(mrs, "w"))
+    json.dump({"iid": 4, "sha": mr_sha, "head_pipeline": hp}, open(mr, "w"))
+    json.dump({"id": (hp or {}).get("sha"), "parent_ids": list(parents)}, open(commit, "w"))
+json.dump([{"id":9,"ref":"feat","status":"skipped","sha":sha}], open(fx,"w"))
+merge = {"id": 20, "ref": "refs/merge-requests/4/merge", "sha": "m"*40, "status": "failed"}
+with_mr(sha, merge, parents=("b"*40, sha))
+ck(watch.ci_status_at(R, "gitlab", sha, "feat")=="failed",
+   "a failed merged-results pipeline gates the MR, a skipped branch pipeline on the sha is not a green")
+ck(watch.ci_status(R, "gitlab", "feat")=="failed", "branch status follows the MR's gate too")
+with_mr(sha, dict(merge, status="success"), parents=("b"*40, sha))
+ck(watch.ci_status_at(R, "gitlab", sha, "feat")=="success", "a green merged-results pipeline for this sha is the verdict")
+with_mr(sha, dict(merge, status="success"), parents=("b"*40, "c"*40))
+ck(watch.ci_status_at(R, "gitlab", sha, "feat")=="none", "a merged-results pipeline built for an older head is no verdict yet")
+with_mr("c"*40, dict(merge, status="success", sha="c"*40))
+ck(watch.ci_status_at(R, "gitlab", sha, "feat")=="none", "an MR not yet updated to the watched sha gives no verdict")
+with_mr(sha, None)
+ck(watch.ci_status_at(R, "gitlab", sha, "feat")=="none", "an MR with no pipeline yet gives no verdict")
+with_mr(sha, {"id": 3, "ref": "refs/merge-requests/4/head", "sha": sha, "status": "running"})
+ck(watch.ci_status_at(R, "gitlab", sha, "feat")=="pending", "the MR pipeline still running keeps the verdict pending")
+with_mr(sha, merge, parents=("b"*40, sha))
+json.dump([{"id":7,"name":"test","status":"failed","allow_failure":False}], open(jobs,"w"))
+ck("JOB 7 FAILED" in watch.failing_log(R, "gitlab", "feat", sha), "the failing log comes from the MR's gating pipeline")
 PY
 out=$(python3 "$ROOT/t2g.py" "$SCRIPTS" "$ROOT/gl" 2>&1); rc=$?
 while IFS= read -r l; do case "$l" in PASS*) ok "${l#PASS }";; FAIL*) ko "${l#FAIL }";; esac; done <<< "$out"
