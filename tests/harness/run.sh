@@ -345,4 +345,34 @@ python3 "$SHIP" mark-done --repo "$dF" --summary w >/dev/null
 assert_eq "yes" "$(env -u HARNESS_AUTO_ENGAGE python3 "$REVIEW" engaged --repo "$dF" --session sf)" \
   "15. declared delivery in flight → the pre-push gate arms"
 
+# --- 16. E2E ledger staleness tracks the plugins the lane exercises, not the whole marketplace -------
+dL="$ROOT/ledger"; new_repo "$dL"
+mkdir -p "$dL/tests/e2e" "$dL/plugins/ship-when-done" "$dL/plugins/claude-remote-spawn" \
+  "$dL/plugins/proof-of-fix" "$dL/lib"
+cp "$REPO_ROOT/tests/e2e/e2e.py" "$dL/tests/e2e/"
+touch "$dL/plugins/ship-when-done/a"; git -C "$dL" add -A; git -C "$dL" commit -qm harness
+harness_sha=$(git -C "$dL" rev-parse --short HEAD)
+ledger_rev(){ python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import e2e; print(e2e.harness_rev())' "$dL/tests/e2e"; }
+touch "$dL/plugins/claude-remote-spawn/b"; git -C "$dL" add -A; git -C "$dL" commit -qm crs
+touch "$dL/plugins/proof-of-fix/c"; git -C "$dL" add -A; git -C "$dL" commit -qm pof
+assert_eq "$harness_sha" "$(ledger_rev)" "16. a commit to a plugin the lane never runs leaves every proof fresh"
+touch "$dL/lib/_kernel.py"; git -C "$dL" add -A; git -C "$dL" commit -qm kernel
+assert_eq "$(git -C "$dL" rev-parse --short HEAD)" "$(ledger_rev)" "16. a kernel change makes the ledger stale"
+fill_labels(){ python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import e2e
+print(" ".join(sorted(e2e.scenario_label(sc) for sc in e2e.stale_scenarios())))' "$dL/tests/e2e"; }
+all=$(fill_labels)
+for space in 'bare/' 'twist/' 'explicit/' 'multi/'; do
+  assert_contains "$space" "$all" "16. an empty ledger → --fill proves the ${space%/} situations too"
+done
+python3 - "$dL/tests/e2e" <<'PY'
+import json, sys; sys.path.insert(0, sys.argv[1]); import e2e
+cur = e2e.harness_rev()
+labels = sorted(e2e.scenario_label(sc) for sc in e2e.stale_scenarios())
+cov = {l: {"harness": cur} for l in labels}
+cov[labels[-1]]["harness"] = "0000000"
+json.dump(cov, open(e2e.COVERAGE, "w"))
+PY
+last=$(python3 -c 'import sys; print(sorted(sys.argv[1].split())[-1])' "$all")
+assert_eq "$last" "$(fill_labels)" "16. --fill re-proves exactly the stale situation, whatever its space"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]
