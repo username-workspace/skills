@@ -312,7 +312,8 @@ def read_ledger(repo):
         return "absent", None
     except Exception:
         return "corrupt", None
-    if isinstance(st, dict) and isinstance(st.get("needs"), dict):
+    needs = st.get("needs") if isinstance(st, dict) else None
+    if isinstance(needs, dict) and all(isinstance(n, dict) for n in needs.values()):
         return "ok", st
     return "corrupt", None
 
@@ -339,13 +340,12 @@ def stamp_live(session, prompt_id, scope):
                 os.remove(e.path)
     except OSError:
         pass
-    write_state(live_path(session), {"prompt_id": prompt_id or "", "scope": bool(scope),
-                                     "pid": os.environ.get("CLAUDE_PID", "")})
+    write_state(live_path(session), {"prompt_id": prompt_id or "", "scope": bool(scope)})
 
 
 def previous_prompt_id(transcript, prompt_id):
     """The prompt before `prompt_id` in the transcript ('' before the first one), None if unreadable.
-    Every entry of a turn carries its promptId, so the tail nearly always holds the previous turn."""
+    Every user entry of a turn (its prompt, its tool results) carries the turn's promptId."""
     try:
         size = os.path.getsize(transcript)
         with open(transcript, "rb") as f:
@@ -380,13 +380,13 @@ def driven(repo, session, prompt_id):
     """True while delivery-conductor holds the current branch for a need: every sibling stands down on
     it. Only while the conductor runs for this very prompt, so a ledger left behind by a disabled
     conductor is inert; a corrupt ledger under a running conductor holds every branch."""
-    status, ledger = read_ledger(repo)
-    if status == "absent" or not conductor_live(session, prompt_id):
+    if not conductor_live(session, prompt_id):
         return False
-    if status == "corrupt":
-        return True
+    status, ledger = read_ledger(repo)
+    if status != "ok":
+        return status == "corrupt"
     branch = cur_branch(repo)
-    return bool(branch) and any((n or {}).get("branch") == branch for n in ledger["needs"].values())
+    return bool(branch) and any(n.get("branch") == branch for n in ledger["needs"].values())
 
 
 def provenance_path(repo):

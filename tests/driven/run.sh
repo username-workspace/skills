@@ -89,6 +89,16 @@ d="$ROOT/d4"; new_repo "$d"; prime "$d" d4; conductor_at "$d" d4 p1
 printf '{not json' > "$d/.git/conductor.json"
 assert_eq "" "$(stops "$d" d4 p1)" "D4. corrupt ledger, running conductor: siblings silent"
 
+# --- D4b. a ledger whose need entry is not an object is corrupt too: held, never a traceback that
+# silences the Stop with no evidence or lets a push through the pre-push gate with no deny at all
+d="$ROOT/d4b"; new_repo "$d"; prime "$d" d4b; conductor_at "$d" d4b p1
+printf '{"v":1,"needs":{"n1":"need/n1"}}' > "$d/.git/conductor.json"
+assert_eq "" "$(stops "$d" d4b p1 2>&1)" "D4b. non-object need entry, running conductor: siblings silent, no traceback"
+git -C "$d" add -A; git -C "$d" commit -qm w
+out=$(printf '{"session_id":"d4b","cwd":"%s","prompt_id":"p1","tool_name":"Bash","tool_input":{"command":"git push -u origin need/n1"}}' "$d" \
+  | hook merge-review prepush-hook.py)
+assert_contains 'delivery-conductor' "$out" "D4b. and a push by hand is still denied, pointing back to the conductor"
+
 # --- D5. only the held branch is driven ----------------------------------------------------------------
 d="$ROOT/d5"; new_repo "$d"; hold "$d"; conductor_at "$d" d5 p1
 git -C "$d" checkout -q -b other; prime "$d" d5
@@ -125,6 +135,13 @@ assert_eq "" "$out" "Q1. prompt right after the conductor's last run: its stamp 
 transcript "$tp" p1 p2 p3
 out=$(payload q1 "$dn" p3 "fix the crash" "$tp" | hook proof-of-fix prompt-hook.py)
 assert_contains 'additionalContext' "$out" "Q1. one prompt later: proof-of-fix nudges again"
+python3 -c 'import json, sys
+with open(sys.argv[1], "a") as f:
+    f.write(json.dumps({"type": "assistant", "message": {"content": "x" * 1200000}}) + "\n")
+    f.write(json.dumps({"type": "user", "promptId": "p4", "message": {"content": "x"}}) + "\n")' "$tp"
+dm="$ROOT/q1m"; new_repo "$dm"; conductor_at "$dm" q1 p3
+out=$(payload q1 "$dm" p4 "fix the crash" "$tp" | hook proof-of-fix prompt-hook.py)
+assert_eq "" "$out" "Q1. previous prompt found beyond a 1 MiB tail with no other promptId in it"
 
 # --- Q2. a session launched outside the conductor's scope ($HOME, explicit mode) on a driven branch:
 # the repo-wide mark-done marker the conductor wrote would let its ship-when-done commit, push and open

@@ -173,9 +173,11 @@ probe → fix → gate → mark-done → review → push → PR → watch → me
 When delivery-conductor drives a need (see the
 [autonomous-delivery plan](plans/2026-09-26-autonomous-delivery.md)), the need's branch is **held**:
 the conductor is the only plugin that instructs the session there. Every sibling asks the kernel's
-`driven(repo, session, prompt_id)` on each channel it owns and stands down while it is true:
+`driven(repo, session, prompt_id)` on each hook channel it owns and stands down while it is true:
 ship-when-done, mr-watchdog and proof-of-fix stay silent at the Stop, proof-of-fix's bug nudge gives
 way to the conductor's contract step, and merge-review's pre-push deny points back to the conductor.
+The two other channels a driven session hears, background-task output and the bodies of the skills
+it invokes, are brought under the same rule by the stage protocol and the conductor itself.
 
 `driven()` is true only while the conductor **runs for this very prompt**: each of its hooks refreshes
 the session's liveness stamp with the `prompt_id` Claude Code passes to every UserPromptSubmit and Stop
