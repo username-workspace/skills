@@ -13,6 +13,7 @@ failure files a GitHub issue on the skills repo carrying the full evidence, read
 Usage: python3 tests/e2e/e2e.py [--seed N] [--count N] [--repo owner/name] [--scenario flow:gate:ci]
 """
 import argparse, json, os, random, shutil, subprocess, sys, tempfile, time
+from urllib.parse import quote
 
 os.environ.setdefault("HARNESS_AUTO_ENGAGE", "1")   # the generated scenarios replay the AUTO lanes
 
@@ -23,7 +24,8 @@ WATCH = os.path.join(SKILLS, "plugins/mr-watchdog/skills/mr-watchdog/scripts/wat
 SHIP_HOOK = os.path.join(SKILLS, "plugins/ship-when-done/hooks/stop-hook.py")
 SHIP_PLUGIN = os.path.join(SKILLS, "plugins/ship-when-done")
 HARNESS = ("plugins/ship-when-done", "plugins/merge-review", "plugins/mr-watchdog", "lib")
-E2E_REPO = "username-workspace/harness-e2e"
+E2E_REPO = "username-workspace/harness-e2e"      # same path on github.com and gitlab.com
+FORGE = "github"
 ISSUE_REPO = "username-workspace/skills"
 
 DIMS = {
@@ -97,22 +99,66 @@ def expect(cond, what, evidence=""):
 
 # --- self-heal: the sandbox must be clean before and after, whatever previous runs did --------------
 
-def gc_sandbox():
+# --- the sandbox forge: one small surface, GitHub via gh, GitLab via its REST API through glab -------
+
+def gl_project():
+    return f"projects/{quote(E2E_REPO, safe='')}"
+
+
+def open_prs():
+    """Open PRs/MRs as [{number, branch, draft}]."""
+    if FORGE == "gitlab":
+        rc, out, _ = sh(["glab", "api", f"{gl_project()}/merge_requests?state=opened&per_page=100"])
+        return [{"number": m["iid"], "branch": m["source_branch"], "draft": bool(m.get("draft"))}
+                for m in (json.loads(out) if rc == 0 and out else [])]
     rc, out, _ = sh(["gh", "pr", "list", "--repo", E2E_REPO, "--state", "open",
-                     "--json", "number,headRefName"])
-    for pr in (json.loads(out) if rc == 0 and out else []):
-        if pr["headRefName"].startswith("e2e/"):
-            sh(["gh", "pr", "close", str(pr["number"]), "--repo", E2E_REPO, "--delete-branch"])
+                     "--json", "number,headRefName,isDraft"])
+    return [{"number": p["number"], "branch": p["headRefName"], "draft": p["isDraft"]}
+            for p in (json.loads(out) if rc == 0 and out else [])]
+
+
+def branch_delete(branch):
+    if FORGE == "gitlab":
+        sh(["glab", "api", "-X", "DELETE", f"{gl_project()}/repository/branches/{quote(branch, safe='')}"])
+    else:
+        sh(["gh", "api", "-X", "DELETE", f"repos/{E2E_REPO}/git/refs/heads/{branch}"])
+
+
+def pr_close(pr, branch=None, check=False):
+    """Close the PR/MR; with `branch`, delete its head branch too."""
+    if FORGE == "gitlab":
+        sh(["glab", "api", "-X", "PUT", f"{gl_project()}/merge_requests/{pr['number']}",
+            "-f", "state_event=close"], check=check)
+    else:
+        sh(["gh", "pr", "close", str(pr["number"]), "--repo", E2E_REPO], check=check)
+    if branch:
+        branch_delete(branch)
+
+
+def branches():
+    if FORGE == "gitlab":
+        rc, out, _ = sh(["glab", "api", f"{gl_project()}/repository/branches?per_page=100"])
+        return [b["name"] for b in (json.loads(out) if rc == 0 and out else [])]
     rc, out, _ = sh(["gh", "api", f"repos/{E2E_REPO}/branches", "--jq", ".[].name"])
-    for b in (out.splitlines() if rc == 0 else []):
+    return out.splitlines() if rc == 0 else []
+
+
+def gc_sandbox():
+    for pr in open_prs():
+        if pr["branch"].startswith("e2e/"):
+            pr_close(pr)
+    for b in branches():
         if b.startswith("e2e/"):
-            sh(["gh", "api", "-X", "DELETE", f"repos/{E2E_REPO}/git/refs/heads/{b}"])
+            branch_delete(b)
 
 
 # --- scenario plumbing -------------------------------------------------------------------------------
 
 def clone(workdir):
-    sh(["gh", "repo", "clone", E2E_REPO, workdir, "--", "-q"], check=True)
+    if FORGE == "gitlab":
+        sh(["git", "clone", "-q", f"git@gitlab.com:{E2E_REPO}.git", workdir], check=True)
+    else:
+        sh(["gh", "repo", "clone", E2E_REPO, workdir, "--", "-q"], check=True)
     sh(["git", "-C", workdir, "config", "user.email", "e2e@harness"], check=True)
     sh(["git", "-C", workdir, "config", "user.name", "harness-e2e"], check=True)
     sh(["git", "-C", workdir, "config", "commit.gpgsign", "false"], check=True)
@@ -184,9 +230,11 @@ def coverage_record(label, runid, secs):
 
 def scenario_label(sc):
     if sc.get("twist"):
-        return f"twist/{sc['twist']}"
-    base = f"{sc.get('project', 'bare')}/{sc['flow']}/{sc['gate']}/{sc['ci']}"
-    return f"explicit/{base}" if sc.get("mode") == "explicit" else base
+        label = f"twist/{sc['twist']}"
+    else:
+        base = f"{sc.get('project', 'bare')}/{sc['flow']}/{sc['gate']}/{sc['ci']}"
+        label = f"explicit/{base}" if sc.get("mode") == "explicit" else base
+    return label if FORGE == "github" else f"{FORGE}/{label}"
 
 
 def ledger_spaces():
@@ -211,7 +259,7 @@ def stale_scenarios():
 def coverage_report():
     cov = coverage_read()
     cur = harness_rev()
-    print(f"coverage ledger — {len(cov)} situation(s) proven · harness @ {cur}")
+    print(f"coverage ledger ({FORGE}) — {len(cov)} situation(s) proven · harness @ {cur}")
     for space, scs in ledger_spaces().items():
         keys = [scenario_label(sc) for sc in scs]
         missing = [k for k in keys if k not in cov]
@@ -233,10 +281,8 @@ def watch_until_resolved(repo, timeout=420, env=None):
 def pr_state(branch):
     """The OPEN PR for this exact head branch, else None — `gh pr view <branch>` also matches closed
     PRs from previous runs, which is a different question and broke cross-run isolation."""
-    rc, out, _ = sh(["gh", "pr", "list", "--repo", E2E_REPO, "--head", branch, "--state", "open",
-                     "--json", "state,isDraft,number"])
-    prs = json.loads(out) if rc == 0 and out else []
-    return prs[0] if prs else None
+    prs = [p for p in open_prs() if p["branch"] == branch]
+    return {"state": "OPEN", "isDraft": prs[0]["draft"], "number": prs[0]["number"]} if prs else None
 
 
 # --- the scenario executor ---------------------------------------------------------------------------
@@ -321,7 +367,7 @@ def run_scenario(sc, tag):
         expect(ev.get("cmd") == project["expected_gate"] and ev.get("verdict") == "pass",
                f"auto-detected gate must be '{project['expected_gate']}' and green", json.dumps(ev))
 
-    sh(["gh", "pr", "close", str(pr["number"]), "--repo", E2E_REPO, "--delete-branch"])
+    pr_close(pr, branch)
     shutil.rmtree(os.path.dirname(workdir), ignore_errors=True)
     return "pass"
 
@@ -393,17 +439,17 @@ def twist_amend_after_push(tag):
     expect("ok, all good" not in out and "ROOT" not in out, "no verdict for a rewritten HEAD", out)
     pr = pr_state(branch)
     if pr:
-        sh(["gh", "pr", "close", str(pr["number"]), "--repo", E2E_REPO, "--delete-branch"])
+        pr_close(pr, branch)
 
 
 def twist_mr_closed_mid_watch(tag):
     """The human closes the MR while the watcher polls: nothing left to watch, clean exit."""
     workdir, branch, session, tp = twist_setup(tag, "mr-closed-mid-watch")
     pr = deliver(workdir, branch, session, tp, ci="slow-green")
-    sh(["gh", "pr", "close", str(pr["number"]), "--repo", E2E_REPO], check=True)
+    pr_close(pr, check=True)
     rc, out, err = sh([sys.executable, WATCH, "run", "--repo", workdir], timeout=120)
     expect("no open merge request" in out + err, "closed MR → the watcher stands down", out + err)
-    sh(["gh", "api", "-X", "DELETE", f"repos/{E2E_REPO}/git/refs/heads/{branch}"])
+    branch_delete(branch)
 
 
 def twist_manual_push_midflow(tag):
@@ -419,7 +465,7 @@ def twist_manual_push_midflow(tag):
     out = stop(workdir, session, tp, active=True)
     pr = pr_state(branch)
     expect(pr and pr["state"] == "OPEN", "manual push absorbed, the PR still opens", out)
-    sh(["gh", "pr", "close", str(pr["number"]), "--repo", E2E_REPO, "--delete-branch"])
+    pr_close(pr, branch)
 
 
 def twist_review_loop(tag):
@@ -442,7 +488,7 @@ def twist_review_loop(tag):
     out = stop(workdir, session, tp, active=True)
     pr = pr_state(branch)
     expect(pr and pr["state"] == "OPEN", "passing review ships the loop's result", out)
-    sh(["gh", "pr", "close", str(pr["number"]), "--repo", E2E_REPO, "--delete-branch"])
+    pr_close(pr, branch)
 
 
 def twist_two_sessions(tag):
@@ -465,7 +511,7 @@ def twist_two_sessions(tag):
     out = stop(workdir, sa, tp, active=True)
     pr = pr_state(branch)
     expect(pr is not None and pr["state"] == "OPEN", "SA ships after review; SB never interfered", out)
-    sh(["gh", "pr", "close", str(pr["number"]), "--repo", E2E_REPO, "--delete-branch"])
+    pr_close(pr, branch)
 
 
 def twist_bg_writer(tag):
@@ -493,7 +539,7 @@ def twist_bg_writer(tag):
         expect(pr is not None and pr["state"] == "OPEN", "the delivery shipped around the live writer", out)
         _, porc, _ = sh(["git", "-C", workdir, "status", "--porcelain"])
         expect("ledger.json" in porc, "the claimed file stayed in the tree, untouched", porc)
-        sh(["gh", "pr", "close", str(pr["number"]), "--repo", E2E_REPO, "--delete-branch"])
+        pr_close(pr, branch)
     finally:
         writer.terminate()
         writer.wait()
@@ -559,6 +605,8 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--count", type=int, default=2)
     ap.add_argument("--repo", default=E2E_REPO)
+    ap.add_argument("--forge", choices=("github", "gitlab"), default="github",
+                    help="which sandbox forge to run against (the ledger keeps one proof per forge)")
     ap.add_argument("--scenario", help="one-off flow:gate:ci[:project] or twist:<name>")
     ap.add_argument("--projects", action="store_true",
                     help="full-integration suite over the project archetypes (auto-detected gates)")
@@ -572,6 +620,7 @@ def main():
                          "CURRENT harness (a stale proof is a hole)")
     args = ap.parse_args()
     globals()["E2E_REPO"] = args.repo
+    globals()["FORGE"] = args.forge
 
     if args.coverage:
         coverage_report()
@@ -598,7 +647,7 @@ def main():
         scenarios = generate(args.seed, args.count)
 
     runid = format(int(time.time()) % 36 ** 4, "x")
-    print(f"harness-e2e · forge={E2E_REPO} · seed={args.seed} · run={runid} · {len(scenarios)} scenario(s)")
+    print(f"harness-e2e · forge={FORGE}:{E2E_REPO} · seed={args.seed} · run={runid} · {len(scenarios)} scenario(s)")
     sh([sys.executable, SHIP, "claim", "--repo", SKILLS, "--path", "tests/e2e/coverage.json",
         "--pid", str(os.getpid())])
     failures = 0

@@ -150,10 +150,10 @@
     "harness": "f782c83"
   },
   "bare/single-shot/green/red-then-fixed": {
-    "run": "1905a1",
+    "run": "191570",
     "proven": "2026-09-26",
-    "secs": 83,
-    "harness": "f782c83"
+    "secs": 82,
+    "harness": "b408672"
   },
   "bare/single-shot/green/slow-green": {
     "run": "1905a1",
@@ -293,6 +293,24 @@
     "secs": 45,
     "harness": "f782c83"
   },
+  "gitlab/bare/single-shot/green/green": {
+    "run": "1914ca",
+    "proven": "2026-09-26",
+    "secs": 45,
+    "harness": "b408672"
+  },
+  "gitlab/bare/single-shot/green/red-then-fixed": {
+    "run": "191500",
+    "proven": "2026-09-26",
+    "secs": 84,
+    "harness": "b408672"
+  },
+  "gitlab/twist/mr-closed-mid-watch": {
+    "run": "191555",
+    "proven": "2026-09-26",
+    "secs": 13,
+    "harness": "b408672"
+  },
   "go/single-shot/auto/green": {
     "run": "1905a1",
     "proven": "2026-09-26",
@@ -342,10 +360,10 @@
     "harness": "f782c83"
   },
   "twist/mr-closed-mid-watch": {
-    "run": "1905a1",
+    "run": "1915c4",
     "proven": "2026-09-26",
-    "secs": 16,
-    "harness": "f782c83"
+    "secs": 12,
+    "harness": "b408672"
   },
   "twist/preexisting-dirty": {
     "run": "191142",

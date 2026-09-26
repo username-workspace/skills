@@ -256,7 +256,8 @@ Two cross-plugin suites cover what per-plugin tests can't:
 ### The E2E lane (excluded from CI)
 
 `bash tests/e2e/run.sh` replays generated full deliveries against a **real sandbox forge**
-(`username-workspace/harness-e2e`, plan-steered CI): real pushes, PRs, checks, and registration
+(`username-workspace/harness-e2e` on github.com, and its gitlab.com twin with `--forge gitlab`;
+plan-steered CI): real pushes, PRs, checks, and registration
 windows — the things hermetic tests idealise away (composition, environment, time, state evolution).
 
 It is **self-healing**: stale `e2e/*` branches and PRs are garbage-collected, each failure is retried

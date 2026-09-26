@@ -64,7 +64,9 @@ Hermetic tests idealize composition, environment, time, and state evolution. Two
 - **The E2E lane** — `bash tests/e2e/run.sh` replays seeded generated scenarios (flow × gate × CI ×
   project archetypes), human-divergence twists (`--twists`: dirty start, wip/, amend-mid-watch, MR
   closed, manual push, failing review loop), and the explicit-default set (`--explicit`) against the
-  real sandbox forge `username-workspace/harness-e2e` (plan-steered CI): real pushes, PRs, checks and
+  real sandbox forges `username-workspace/harness-e2e` — on github.com, and on gitlab.com with
+  `--forge gitlab` (branch + MR pipelines; the ledger keeps one proof per forge), plan-steered CI —
+  real pushes, PRs/MRs, checks/pipelines and
   registration windows. Self-healing: stale `e2e/*` branches/PRs are garbage-collected, each failure is
   retried once to classify flake vs defect, and persistent failures file a labelled issue on this repo
   with the reproduction command. Run it deliberately (release, harness change) — excluded from CI.
