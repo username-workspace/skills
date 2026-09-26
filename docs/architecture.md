@@ -122,6 +122,7 @@ plugin degrades to inert rather than crash.
 | `mr-watchdog-session.json` | mr-watchdog | session baselines (engagement) |
 | `mr-watchdog-watch.json` | mr-watchdog | per-HEAD watch dedup |
 | `proof-of-fix.json` | proof-of-fix | each session's active repro (command + recorded red verdict) |
+| `conductor.json` | delivery-conductor | the need ledger: which branches a need holds (read by every sibling through `driven()`) |
 
 This lists the coupling and observability state. Per-session nudge-dedup markers (e.g.
 `proof-of-fix-nudge.json`) and the trusted config files (`.git/<plugin>.json`, §8) live under `.git/`
@@ -136,6 +137,11 @@ too but are not coupling state.
 - merge-review and ship-when-done **read each other's provenance** for engagement (§6).
 
 No sibling is a hard dependency — install any one alone and it simply skips the coupled steps.
+
+One stamp lives outside `.git/`: delivery-conductor's **liveness**, one file per session under
+`~/.claude/harness-live/` (`HARNESS_LIVE_DIR` overrides it; entries older than 7 days are collected).
+It is keyed by session alone because a session launched outside the conductor's scope may have no repo
+yet when its prompt starts.
 
 ---
 
@@ -161,6 +167,25 @@ This repository **ships through its own harness** (dogfooding): every change is 
 probe → fix → gate → mark-done → review → push → PR → watch → merge loop it provides.
 
 ---
+
+### One voice while driven
+
+When delivery-conductor drives a need (see the
+[autonomous-delivery plan](plans/2026-09-26-autonomous-delivery.md)), the need's branch is **held**:
+the conductor is the only plugin that instructs the session there. Every sibling asks the kernel's
+`driven(repo, session, prompt_id)` on each hook channel it owns and stands down while it is true:
+ship-when-done, mr-watchdog and proof-of-fix stay silent at the Stop, proof-of-fix's bug nudge gives
+way to the conductor's contract step, and merge-review's pre-push deny points back to the conductor.
+The two other channels a driven session hears, background-task output and the bodies of the skills
+it invokes, are brought under the same rule by the stage protocol and the conductor itself.
+
+`driven()` is true only while the conductor **runs for this very prompt**: each of its hooks refreshes
+the session's liveness stamp with the `prompt_id` Claude Code passes to every UserPromptSubmit and Stop
+(unchanged through a blocked Stop's continuation). A conductor that stops running, through
+`/reload-plugins` or an uninstall, stops refreshing it, so the ledger it leaves behind is inert and the
+siblings re-engage by the next prompt. A UserPromptSubmit caller runs in parallel with the conductor's
+own hook, so it also accepts the previous prompt's stamp, read from the transcript's `promptId`
+entries. Under a running conductor, a corrupt ledger holds every branch (fail closed).
 
 ## 6. Engagement modes
 

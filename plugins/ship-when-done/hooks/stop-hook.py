@@ -61,7 +61,7 @@ def main():
             pass
     todos_done = bool(todos) and all((it or {}).get("status") == "completed" for it in todos)
     cmd = [sys.executable, script, "engage", "--repo", repo, "--goal", goal, "--last-message", last,
-           "--session", session]
+           "--session", session, "--prompt-id", payload.get("prompt_id") or ""]
     if todos_done:
         cmd.append("--todos-done")
     try:

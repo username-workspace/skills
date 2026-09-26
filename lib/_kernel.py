@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
 
@@ -297,6 +298,95 @@ def marker_for_branch(repo, branch):
     branch. Inert when the sibling is absent."""
     m = read_marker(repo)
     return bool(m and m.get("branch") == branch)
+
+
+def ledger_path(repo):
+    return os.path.join(git_dir(repo), "conductor.json")
+
+
+def read_ledger(repo):
+    """delivery-conductor's need ledger as ('absent' | 'ok' | 'corrupt', ledger)."""
+    try:
+        st = json.load(open(ledger_path(repo)))
+    except FileNotFoundError:
+        return "absent", None
+    except Exception:
+        return "corrupt", None
+    needs = st.get("needs") if isinstance(st, dict) else None
+    if isinstance(needs, dict) and all(isinstance(n, dict) for n in needs.values()):
+        return "ok", st
+    return "corrupt", None
+
+
+def live_dir():
+    return os.environ.get("HARNESS_LIVE_DIR") or os.path.join(os.path.expanduser("~"), ".claude", "harness-live")
+
+
+def live_path(session):
+    return os.path.join(live_dir(), re.sub(r"[^\w.-]", "_", session) + ".json")
+
+
+def stamp_live(session, prompt_id, scope):
+    """delivery-conductor refreshes this from each of its hooks: proof that it runs in `session` at
+    `prompt_id`. Keyed by session alone, never by repo: a session launched outside the conductor's
+    scope may have no repo yet when its prompt starts, and must still be seen as running it."""
+    if not session:
+        return
+    try:
+        os.makedirs(live_dir(), exist_ok=True)
+        cutoff = time.time() - SESSION_GC_DAYS * 86400
+        for e in os.scandir(live_dir()):
+            if e.stat().st_mtime < cutoff:
+                os.remove(e.path)
+    except OSError:
+        pass
+    write_state(live_path(session), {"prompt_id": prompt_id or "", "scope": bool(scope)})
+
+
+def previous_prompt_id(transcript, prompt_id):
+    """The prompt before `prompt_id` in the transcript ('' before the first one), None if unreadable.
+    Every user entry of a turn (its prompt, its tool results) carries the turn's promptId."""
+    try:
+        size = os.path.getsize(transcript)
+        with open(transcript, "rb") as f:
+            for start in (max(0, size - 1048576), 0):
+                f.seek(start)
+                ids = [i for i in re.findall(r'"promptId":\s*"([^"]+)"', f.read().decode("utf-8", "ignore"))
+                       if i != prompt_id]
+                if ids or start == 0:
+                    return ids[-1] if ids else ""
+    except (OSError, TypeError):
+        return None
+
+
+def conductor_live(session, prompt_id, transcript=None, at_prompt=False):
+    """The conductor's stamp when it ran for this prompt. A UserPromptSubmit caller runs in parallel
+    with the conductor's own hook, so it also accepts the stamp of the prompt just before."""
+    st = read_state(live_path(session)) if session else None
+    last = st.get("prompt_id") if isinstance(st, dict) else None
+    if last is None or not prompt_id:
+        return None
+    if last == prompt_id or (at_prompt and last == previous_prompt_id(transcript, prompt_id)):
+        return st
+    return None
+
+
+def conductor_scope(session, prompt_id, transcript):
+    st = conductor_live(session, prompt_id, transcript, at_prompt=True)
+    return bool(st and st.get("scope"))
+
+
+def driven(repo, session, prompt_id):
+    """True while delivery-conductor holds the current branch for a need: every sibling stands down on
+    it. Only while the conductor runs for this very prompt, so a ledger left behind by a disabled
+    conductor is inert; a corrupt ledger under a running conductor holds every branch."""
+    if not conductor_live(session, prompt_id):
+        return False
+    status, ledger = read_ledger(repo)
+    if status != "ok":
+        return status == "corrupt"
+    branch = cur_branch(repo)
+    return bool(branch) and any(n.get("branch") == branch for n in ledger["needs"].values())
 
 
 def provenance_path(repo):
