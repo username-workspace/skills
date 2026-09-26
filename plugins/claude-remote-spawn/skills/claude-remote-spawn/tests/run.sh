@@ -7,6 +7,7 @@ ROOT="$(mktemp -d)"
 mkdir -p "$ROOT/bin"
 cat > "$ROOT/bin/claude" <<'EOF'
 #!/usr/bin/env bash
+[ -n "${CRS_ARGV_CAP:-}" ] && printf '<%s>\n' "$@" > "$CRS_ARGV_CAP"
 echo "stubbed-1.0"
 exit 0
 EOF
@@ -15,6 +16,9 @@ chmod +x "$ROOT/bin/claude"
 cat > "$ROOT/bin/script" <<EOF
 #!/usr/bin/env bash
 echo "\$*" >> "$ROOT/script.cap"
+if [ -n "\${CRS_ARGV_CAP:-}" ]; then     # util-linux 'script -qec CMD' hands CMD to \$SHELL -c; BSD 'script -q FILE cmd…' runs argv
+  case "\$1" in -qec) "\${SHELL:-/bin/sh}" -c "\$2" ;; -q) shift 2; "\$@" ;; esac
+fi
 exit 0
 EOF
 chmod +x "$ROOT/bin/script"
@@ -42,6 +46,20 @@ case "\$*" in
 esac
 EOF
 chmod +x "$ROOT/bin/pmset"
+# Linux twins: systemd-inhibit records its argv and holds with the wrapped command (no real inhibitor
+# lock), on_ac_power reads the same $ROOT/power switch.
+cat > "$ROOT/bin/systemd-inhibit" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >> "$ROOT/inhibit.cap"
+while [ "\${1#--}" != "\$1" ]; do shift; done
+exec "\$@"
+EOF
+chmod +x "$ROOT/bin/systemd-inhibit"
+cat > "$ROOT/bin/on_ac_power" <<EOF
+#!/usr/bin/env bash
+grep -q "AC" "$ROOT/power"
+EOF
+chmod +x "$ROOT/bin/on_ac_power"
 export PATH="$ROOT/bin:$PATH"
 
 # --- helpers ---
@@ -225,6 +243,13 @@ assert_contains "executetheplan42" "$(cat "$ROOT/script.cap" 2>/dev/null)" "18b.
 sp="$(sed -n 's/^subshell=//p' "$STATE/promptest.spawn" 2>/dev/null | head -1)"
 [ -n "$sp" ] && { pkill -P "$sp" 2>/dev/null; kill "$sp" 2>/dev/null; }
 run stop promptest >/dev/null 2>&1 || true
+# 18c. a multi-line, non-ASCII prompt reaches claude as ONE intact argument whatever the login shell
+# (util-linux script runs its -c string through $SHELL; %q quoting is bash-only)
+export CRS_ARGV_CAP="$ROOT/argv.cap"; rm -f "$CRS_ARGV_CAP"
+SHELL=/bin/sh run spawn mlprompt --prompt $'fix the café\nthen ship' >/dev/null 2>&1
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$CRS_ARGV_CAP" ] && break; sleep 0.2; done
+assert_contains $'<fix the café\nthen ship>' "$(cat "$CRS_ARGV_CAP" 2>/dev/null)" "18c. --prompt survives a non-bash login shell intact"
+unset CRS_ARGV_CAP; run stop mlprompt >/dev/null 2>&1 || true
 out=$(run_rc spawn --prompt)
 rc="${out##*$'\n'}"; body="${out%$'\n'*}"
 assert_eq 1 "$rc" "18b. spawn --prompt (no value) → exit 1"
@@ -406,8 +431,8 @@ exit 1
 EOF
   chmod +x "$ROOT/bin/sudo"
   rm -f "$STATE/.keepawake-warned"
-  out=$(run_rc spawn wakedeg); rc="${out##*$'\n'}"; body="${out%$'\n'*}"
-  assert_eq 0 "$rc" "38. keep-awake with no sudo rule → spawn still succeeds (never blocks)"
+  out=$(unset USER; run_rc spawn wakedeg); rc="${out##*$'\n'}"; body="${out%$'\n'*}"
+  assert_eq 0 "$rc" "38. keep-awake with no sudo rule → spawn still succeeds (never blocks), even without \$USER (cron, systemd)"
   assert_contains "keep-awake" "$body" "38. no sudo rule → prints a one-line enable hint"
   wa_sp wakedeg
   cat > "$ROOT/bin/sudo" <<EOF
@@ -493,6 +518,18 @@ run stop trust-resume >/dev/null 2>&1 || true
 # 45. check reports the trust state of the cwd
 out=$(cd "$ROOT" && run check)
 assert_contains "trust  :" "$out" "45. check → reports workspace trust"
+assert_contains "procps : ok" "$out" "45. check → reports pgrep/pkill"
+
+# 46. no procps (minimal Debian): launching refuses loudly instead of recording sessions it can never see alive
+mkdir -p "$ROOT/noprocps"
+for d in /usr/local/bin /usr/bin /bin /usr/sbin /sbin; do for f in "$d"/*; do n="${f##*/}"
+  case "$n" in pgrep|pkill) ;; *) [ -e "$ROOT/noprocps/$n" ] || ln -s "$f" "$ROOT/noprocps/$n" 2>/dev/null ;; esac
+done; done
+out=$(PATH="$ROOT/bin:$ROOT/noprocps" bash "$DRIVER" spawn noprocps 2>&1); rc=$?
+assert_eq 1 "$rc" "46. no pgrep/pkill → spawn exits 1"
+assert_contains "procps" "$out" "46. no pgrep/pkill → says to install procps"
+assert_absent "spawned" "$out" "46. no pgrep/pkill → no invisible session recorded"
+assert_contains "procps : NOT FOUND" "$(PATH="$ROOT/bin:$ROOT/noprocps" bash "$DRIVER" check 2>&1)" "46. check → flags missing procps"
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"

@@ -313,6 +313,13 @@ fi
 : > "$NPX_LOG"
 python3 "$SCRIPTS/collect-multiprovider.py" >/dev/null 2>&1 || true
 case "$(cat "$NPX_LOG")" in *'ccusage@latest'*) ko "D5. no floating @latest";; *) ok "D5. no floating @latest";; esac
+
+# D6. no Node on the machine → the documented "ccusage failed" exit, never a traceback
+mkdir -p "$ROOT/nonode"; ln -sf "$(command -v python3)" "$ROOT/nonode/python3"
+out=$(PATH="$ROOT/nonode" python3 "$SCRIPTS/collect-multiprovider.py" 2>&1); rc=$?
+assert_eq 2 "$rc" "D6. npx missing → exit 2"
+assert_contains "ccusage failed" "$out" "D6. npx missing → says ccusage failed"
+assert_absent "Traceback" "$out" "D6. npx missing → no traceback"
 case "$(cat "$NPX_LOG")" in *'ccusage@20.0.11 daily --json'*) ok "D5. exact ccusage version pinned";; *) ko "D5. exact ccusage version pinned — got [$(cat "$NPX_LOG")]";; esac
 
 echo
