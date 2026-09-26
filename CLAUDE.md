@@ -81,6 +81,7 @@ Hermetic tests idealize composition, environment, time, and state evolution. Two
 - Versions bump together: `plugins/<name>/.claude-plugin/plugin.json` **and**
   `.claude-plugin/marketplace.json`.
 - Shell-command config fields (`gate`, `judge_command`, …) are honored only from `.git/` or
-  `--config` — never from cloneable working-tree files.
+  `--config` — never from cloneable working-tree files. A linked worktree reads the repo's `.git/`
+  config (its own git dir may override it), so a delivery from a worktree keeps the repo's gate.
 - Plugin state lives in `.git/<plugin>-*.json` (never committed); sibling coupling goes through those
   files and degrades to inert when the sibling is absent.

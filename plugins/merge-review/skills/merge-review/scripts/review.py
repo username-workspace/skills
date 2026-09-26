@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _kernel
 from _kernel import (auto_engage, carried_paths, cmd_resolve, cur_branch, default_branch, detect_forge,
                      driven, fake_green, git_dir, head_sha, marker_for_branch, provenance_paths, remote_name,
-                     repo_root, run, write_json)
+                     repo_root, run, trusted_config_paths, write_json)
 
 DEFAULTS = {
     "enabled": True,          # set false to opt a repo OUT (either engagement mode)
@@ -37,7 +37,7 @@ GATE_FIELDS = ("enabled", "threshold", "prepush_gate", "skip_marker", "inline_re
 def load_config(repo, path=None):
     cfg = dict(DEFAULTS)
     sources = [(os.path.join(repo, ".merge-review.json"), False),
-               (os.path.join(git_dir(repo), "merge-review.json"), True),
+               *((p, True) for p in trusted_config_paths(repo, "merge-review.json")),
                (path, True)]
     for p, trusted in sources:
         if p and os.path.isfile(p):

@@ -14,7 +14,7 @@ import _kernel
 from _kernel import (auto_engage, carried_paths, cmd_resolve, cur_branch, driven, git_dir, git_toplevel,
                      gitlab_branch_project_id, marker_for_branch, marker_path, parse_remote,
                      provenance_path, provenance_paths, read_marker, remote_name, repo_root, run,
-                     write_json)
+                     trusted_config_paths, write_json)
 
 DEFAULTS = {
     "on_done": "draft-pr",            # draft-pr | ready-pr | suggest
@@ -91,7 +91,7 @@ COMMAND_FIELDS = ("gate", "judge_command")
 def load_config(repo, path=None):
     cfg = dict(DEFAULTS)
     sources = [(os.path.join(repo, ".ship-when-done.json"), False),
-               (os.path.join(git_dir(repo), "ship-when-done.json"), True),
+               *((p, True) for p in trusted_config_paths(repo, "ship-when-done.json")),
                (path, True)]
     for p, trusted in sources:
         if p and os.path.isfile(p):
