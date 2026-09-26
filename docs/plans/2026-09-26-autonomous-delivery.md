@@ -1,7 +1,7 @@
 # Autonomous Delivery: design and plan
 
 > **Status: Accepted** (2026-09-26). Decisions D1 to D5 approved by Benjamin with the go for Phase 1;
-> D6 and D7 are defaults, open to veto. Revision 4 after three fresh-eyes merge-review passes (see
+> D6 and D7 are defaults, open to veto. Revision 5 after four fresh-eyes merge-review passes (see
 > "Review log" at the end).
 
 **Goal:** a need stated once is driven to an end state with no human intervention: **`ready`** (a
@@ -34,8 +34,8 @@ their own delivery harness (warden, the ZV workspace) keep it; there the new plu
 | F1 | Stop hooks of all plugins run **in parallel**; **every** `block` reason reaches the model, as separate "Stop hook feedback" messages in one continuation | measured 2026-09-26: two hooks fired 5 ms apart, the model quoted both reasons |
 | F2 | UserPromptSubmit also fires for harness envelopes (`<task-notification>`, `<agent-message>`, `<cross-session-message>`); the payload has no origin field | transcripts + CC 2.1.283 hook input; proof-of-fix filters envelopes by content (PR #66, merged) |
 | F3 | `CLAUDE_PROJECT_DIR` is the session's launch dir, stable across `cd` | headless probe (PR #70) |
-| F4 | A hook **cannot invoke a skill or a tool**; it injects text or blocks with a reason | hooks guide: command hooks "can't trigger `/` commands or tool calls" |
-| F5 | The session is allowed to stop after **8 Stop blocks in one turn** (`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`, default 8) | CC 2.1.283 binary: `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP??8`, `hit_cap` |
+| F4 | A command hook **cannot invoke a skill or a tool**; it injects text or blocks with a reason (agent-type hooks can use tools but cannot drive the main session) | hooks guide: command hooks "can't trigger `/` commands or tool calls" |
+| F5 | The session is allowed to stop after **8 consecutive Stop blocks with no tool call between them**; any tool call resets the count (`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`, default 8) | CC 2.1.283 binary: `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP??8`, "blocked the turn from ending N consecutive times", `stopHookBlockingCount:0` on `next_turn` |
 | F6 | `SessionStart` fires with `source` = `startup`, `resume`, `clear`, `compact`, `fork`, and can inject context | hooks guide + binary |
 | F7 | A plugin can declare `dependencies` in `plugin.json` ("Plugins that must be enabled for this plugin to function"; bare names resolve in the same marketplace); Claude Code enforces them at install and update | CC 2.1.283 plugin manifest schema (`dependency_missing`, "is still required by") |
 | F8 | Re-entry after a wait: a background task **the model launched** (proven: mr-watchdog); a hook declared **`asyncRewake`**, which runs in the background and wakes the model on exit code 2; a scheduled wake-up (ScheduleWakeup, CronCreate). The Stop input also carries `background_tasks`, which tells *waiting on background work* from *done*. A process a hook spawns without `asyncRewake` is untracked | `watch.py` design; CC 2.1.283 hook schema and Stop input |
@@ -56,7 +56,7 @@ A need in flight makes `delivery-conductor` the **driver of its branch**. The ke
   and the conductor speaks only to report the block, once. Otherwise a breaker or a halt would hand the
   branch back to siblings that, in the AUTO scope, commit, push and watch on their own;
 - false once the need ends (`ready`, `delivered`, `abandoned`). **Every transition out of driven takes
-  effect at the next UserPromptSubmit**, so `driven()` is stable during the Stop that decides it and no
+  effect at the next UserPromptSubmit of any session** (the deciding `prompt_id` is recorded), so `driven()` is stable during the Stop that decides it and no
   sibling can speak in that turn.
 
 An absent or corrupt ledger reads as not driven.
@@ -64,13 +64,13 @@ An absent or corrupt ledger reads as not driven.
 | Channel | Outside the conductor's scope (unchanged) | Driven |
 |---|---|---|
 | Stop | each plugin's hook may speak | only the conductor speaks, at most one decision; the others call `driven()` and stand down |
-| UserPromptSubmit | proof-of-fix nudges bug-shaped prompts | inside the conductor's scope the conductor's contract nudge **replaces** proof-of-fix's nudge, from the first prompt on (a bug need gets a repro criterion); proof-of-fix checks `conductor_scope(repo)` and stands down |
+| UserPromptSubmit | proof-of-fix nudges bug-shaped prompts | inside the conductor's scope the conductor's contract nudge **replaces** proof-of-fix's nudge, from the first prompt on (a bug need gets a repro criterion); proof-of-fix checks `conductor_scope(repo, session)`, a per-session stamp the conductor writes at SessionStart (so an uninstalled conductor never silences it), and stands down |
 | PreToolUse (merge-review pre-push deny) | denies an unreviewed push, reason instructs a review | pushes are sequenced by the conductor after a passing review, so the deny cannot fire (tested); if it ever does, its reason points back to the conductor. Pushes run inside the conductor's Stop never reach PreToolUse: their safety net is ship-when-done's `review_gate_pending` check in the ladder |
-| Background-task output (watchers, `ship.py gate`, `repro.py check`, deployment wait) | prints the verdict **and** the next step (the watcher's "fix the root cause, push"; `check`'s "fix the root cause, then run check") | every background step prints a neutral verdict line and writes its evidence file; the conductor's next Stop turns it into the single instruction (each step receives `--session` so it can evaluate `driven()`) |
+| Background-task output (watchers, `ship.py gate`, `repro.py check`, deployment wait) | prints the verdict **and** the next step (the watcher's "fix the root cause, push"; `record`'s "fix the root cause, then run check") | every background step prints a neutral verdict line and writes its evidence file; the conductor's next Stop turns it into the single instruction (each step receives `--session` so it can evaluate `driven()`) |
 | Skill bodies | a skill prescribes its own sequence (merge-review: fix, commit, re-review; mr-watchdog: fix, verify, push) | a skill invoked under drive performs **its judgment step only** (review, fix); commit, push and re-entry are the conductor's. Each harness SKILL.md gains a "When driven" section saying so |
 
 **Invariant under test (driven states only):** for every reachable driven state, the union of the hook
-channels and the invoked skill's driven-mode instructions carries at most one instruction per turn.
+channels and the invoked skill's driven-mode instructions carries at most one instruction per Stop decision.
 
 ### 2. The stage protocol and owner CLIs
 
@@ -115,17 +115,18 @@ Each harness plugin exposes one read-only entry point, versioned (`"v": 1`):
 
 ### 3. What starts, advances and resumes a need
 
-F5 bounds a turn to 8 Stop blocks. The conductor counts every block it emits and uses at most 5 per
-turn. **Reaching that budget is a continuation, not a failure**: the last instruction of the turn
-launches a re-entry (F8) and the need stays driven, with no escalation. Waits always go to the
-background.
+F5 caps **consecutive** Stop blocks, and every conductor instruction leads to a tool call, which resets
+the count: advancing a need never runs into the cap. What F5 does protect against is a loop that makes
+no progress, so the conductor owns that guard itself: **three consecutive Stop decisions with no change
+in work state or evidence** are a no-progress breaker (the need is blocked and escalated), well before
+Claude Code's cap. Waits always go to the background.
 
 | Event | Owner | Effect |
 |---|---|---|
 | UserPromptSubmit, human prompt, conductor scope | conductor | captures the prompt **verbatim** (the hook has it) and injects the contract step; the model decides whether it is a need and calls `conductor.py open` |
-| UserPromptSubmit while a need is in flight | conductor | the model classifies the prompt: **halt** (the need is blocked and held at once, §1), **amendment** (contract amended, stale stages re-entered) or **new need** (queued; it will get its own branch from the base, never the branch of a need already handed over) |
+| UserPromptSubmit while a need is in flight | conductor | the model classifies the prompt: **halt** (the need is blocked and held at once, §1; background steps still running finish, their verdicts are recorded but acted on only after resume), **resume** or **abandon** of a blocked need (abandon clears ship-when-done's `mark-done` marker through its CLI, so no sibling ships abandoned work), **amendment** (contract amended, stale stages re-entered) or **new need** (queued: it starts when the current need reaches an end state, on its own branch from the base; a blocked need keeps the queue waiting) |
 | Stop | conductor | advances by one step |
-| SessionStart `compact`, `clear` | conductor | same terminal, same logical session (after `/clear` Claude Code regenerates the id and records the old one as parent): re-binds the need and re-injects the contract and stage |
+| SessionStart `compact`, `clear` | conductor | same terminal, same logical session: re-binds the need and re-injects the contract and stage. The payload carries no parent id, so the conductor recognises the successor by the Claude Code process it records at binding (the hook's parent process): `clear` in the driver's process re-binds, `clear` in any other process gets the notice below |
 | SessionStart `resume` | conductor | re-binds only when the resumed session is the bound one; resuming an unrelated session in the worktree does not take the drive |
 | SessionStart `fork`, `startup`, or any session landing on a branch it does not drive | conductor | no drive; injects one line naming the need, its driver, its last activity and `conductor.py adopt`, so a stall is never silent. Adopting moves the binding (proving evidence is keyed by need, so it follows) |
 | A background task or `asyncRewake` hook resolves | its owner | a new turn; the next Stop reads the evidence file |
@@ -161,8 +162,8 @@ blocked ⇄ (resume | abandon)      any stage → blocked on a breaker or a halt
   enforcing up-to-date merges, the merged tree is the tree that was gated, proven and reviewed.
 - **No CI.** A repo without CI is declared at `open` (`ci: none` in the contract); the `ci` stage is then
   satisfied by the gate evidence at the pushed sha, and the report says so.
-- **Breakers** (budget per need, attempts per stage, CI runs, a failed deployment) move the need to
-  `blocked` and escalate (D5). The per-turn block budget is not a breaker (§3).
+- **Breakers** (budget per need, attempts per stage, CI runs, no progress over three Stop decisions, a
+  failed deployment) move the need to `blocked` and escalate (D5).
 - **`blocked`** holds the branch (§1): siblings silent, the conductor reports once. `conductor.py
   resume` drives again from the stale stage; `abandon` closes the need and hands the branch back to
   standalone behaviour.
@@ -185,7 +186,7 @@ blocked ⇄ (resume | abandon)      any stage → blocked on a breaker or a halt
 
 **The ledger store** is not the kernel's GC'd session map (a need can wait longer than 7 days).
 `conductor.json` has no GC (closed needs are archived to `conductor-archive.jsonl`), is written under
-`fcntl.flock` (released by the kernel when a process dies: no timeout, no stale lock) with
+`fcntl.flock` (released by the OS when a process dies: no timeout, no stale lock) with
 compare-and-set on a version counter, and `open` surfaces a failed write.
 
 ---
@@ -200,8 +201,7 @@ compare-and-set on a version counter, and `open` surfaces a failed write.
   sessions are bindings of it.
 - **Budgets and breakers.** Wall clock per need, attempts per stage, CI runs per need. A breaker blocks
   the need and escalates (D5: the conductor's report instruction asks the model to send a push
-  notification, since a hook cannot call a tool, F4). The 5-blocks-per-turn budget only continues the
-  need (§3).
+  notification, since a hook cannot call a tool, F4). The no-progress breaker (§3) is one of them.
 - **Report.** At `ready` or `delivered`: need, PR/MR, head or merge sha, deployment when any,
   per-criterion evidence, time, cost. Never a field the need did not reach.
 
@@ -228,7 +228,11 @@ compare-and-set on a version counter, and `open` surfaces a failed write.
 - **After merge:** watch the default-branch pipeline at the merge sha, then run the env-aware read-only
   probes against `verify_base_url`.
 - **On red:** open a revert PR/MR through the forge CLI (ship-to-prod owns reverts), block the need,
-  escalate. The revert is merged by a human (D6). Pushes of an updated branch stay ship-when-done's.
+  escalate. The revert is merged by a human (D6).
+- **Base drift** is ship-to-prod's: it requests the forge-side update and ship-when-done syncs and
+  pushes the branch. At `open` it checks that the forge enforces up-to-date merges, and fails the
+  contract otherwise. Its policy is read from the repository's common git dir, so linked worktrees see
+  it.
 
 ### Changes to existing plugins
 
@@ -239,7 +243,8 @@ compare-and-set on a version counter, and `open` surfaces a failed write.
 | mr-watchdog | `stage` CLI; `handoff` subcommand; Stop stands down when driven; neutral verdict output under drive; SKILL.md "When driven"; verdict functions move to the kernel |
 | proof-of-fix | `stage` CLI; schema v2; env-aware and read-only probes; stamps its script path; nudge and Stop stand down under the conductor |
 | merge-review (bis) | `record --sha` binds the verdict to the reviewed sha |
-| kernel | `driven()`, `conductor_scope()`, shared CI verdict functions and envelope detection; `scripts/kernel-sync.py` gains the new plugins |
+| ship-when-done (bis) | owner subcommands for the conductor's script steps: `commit`, `push`, `open-pr`, `mark-ready` (today only `ladder`/`engage` exist, and they run the gate synchronously) |
+| kernel | `driven()`, `conductor_scope()`, shared CI verdict functions and envelope detection (preferring the UserPromptSubmit `source` field, declared in the 2.1.283 schema, whenever Claude Code fills it; content matching otherwise); `scripts/kernel-sync.py` gains the new plugins |
 
 ---
 
@@ -264,7 +269,8 @@ compare-and-set on a version counter, and `open` surfaces a failed write.
   resume or abandon, every transition and invalidation edge (new HEAD, base drift), a disabled
   safety-stage owner failing `open`, the ledger lock under concurrent writers.
 - **Turn simulator** (`tests/turns`): multi-turn needs; a compaction, a `/clear`, a fork and a fresh
-  start in the worktree in the middle; the per-turn budget continuing the need; a halt prompt.
+  start in the worktree in the middle; the no-progress breaker; halt, resume and abandon prompts; a
+  queued need starting at the current need's end state.
 - **E2E lane.** A `needs` space on both sandboxes: need → ready, need → blocked → resumed, and (Phase 3)
   need → delivered and a failed deploy → revert. The sandboxes gain a default-branch deploy job and a
   read-only env-aware endpoint.
@@ -278,7 +284,7 @@ active, so the harness supervises its own construction.
 | Phase | Deliverable | Plugins |
 |---|---|---|
 | 0 | PRs #66, #69, #70, #72, #73 and the GitLab lane merged; AUTO scope activated | all |
-| 1 | **Driven one-voice + stage protocol + conductor skeleton.** A need goes from prompt to `ready` (a green, reviewed PR/MR) with zero intervention, surviving compaction and a halt; `asyncRewake` evaluated as the re-entry path | conductor (new), ship-when-done, merge-review, mr-watchdog, proof-of-fix, kernel |
+| 1 | **Driven one-voice + stage protocol + conductor skeleton.** A need goes from prompt to `ready` (a green, reviewed PR/MR) with zero intervention, surviving compaction and a halt; until Phase 2, proving checks the recorded bug repros only; `asyncRewake` evaluated as the re-entry path | conductor (new), ship-when-done, merge-review, mr-watchdog, proof-of-fix, kernel |
 | 2 | **Acceptance probes** (schema v2, env-aware, read-only). Proving checks the contract's criteria | proof-of-fix, conductor |
 | 3 | **ship-to-prod.** Up-to-date, sha-bound merge, deployment watch, production verification, revert | ship-to-prod (new), kernel |
 | 4 | **Supervisor.** A need survives the death of its session | conductor, claude-remote-spawn |
@@ -298,38 +304,29 @@ human; **D7** only read-only, env-aware probes may run against production.
 | Need | Mechanism | Fact |
 |---|---|---|
 | Start a need without the user typing a skill | UserPromptSubmit captures the prompt and injects the contract step; the model opens the need | F2, F4 |
-| Advance a need | the conductor's single Stop decision, within the block budget | F1, F5 |
+| Advance a need | the conductor's single Stop decision; a loop without progress trips its own breaker before Claude Code's cap | F1, F5 |
 | Survive a compaction, a `/clear` or a resume; keep a fork or another session from stealing the drive | `SessionStart` re-binds on `compact`/`clear` and on the bound session's `resume`; others get a notice | F6 |
-| Wait on CI, a deployment, the gate or probes; continue past the block budget | a model-launched background task, or an `asyncRewake` hook | F5, F8 |
+| Wait on CI, a deployment, the gate or probes | a model-launched background task, or an `asyncRewake` hook | F8 |
 | Skills calling skills | an instruction that names the skill; the skill's driven-mode section limits it to judgment | F4 |
 | A sibling plugin missing | impossible for the four core siblings (declared `dependencies`); a disabled one fails the contract at `open` | F7 |
 
 ## Review log
 
-- **Revision 1** (0/100, 10 findings): one voice limited to Stop; watcher launch as a script step;
-  forward-only state machine; invariant contradicting undriven behaviour; cross-writes; ship-to-prod
-  policy and state in one file; needs keyed on the session; Stop budget stalls; production probe
-  replay; ledger concurrency and GC.
-- **Revision 2** (0/100 in pass 2: 6 of those resolved, 4 narrowed, 7 new): skill bodies as a channel;
-  handoff stamps still raw writes; fork stealing the drive and session-scoped `driven()`; the block
-  budget both continuation and breaker; a missing sibling skipping a safety stage; no end state with
-  merging disabled; no producer for gate evidence; no way to halt; the move to `blocked` racing the
-  parallel Stop hooks; the merged-sha claim under squash and base drift; unconstrained production
-  probes.
-- **Revision 3** addressed revision 2: the skill-body channel (§1), owner `handoff` subcommands (§2),
-  branch-scoped `driven()` with explicit fork adoption (§1, §3), budget as continuation with an internal
-  deadline (§2, §3), safety-stage owners required at `open` (§2), the `ready` end state (§4), `ship.py
-  gate` (§2), the halt classification (§3), every exit from driven deferred to the next prompt (§1), the
-  up-to-date merge with invalidation on base drift (§4), read-only env-aware production probes (D7).
-  Also adopted: `asyncRewake` as a candidate re-entry (F8), `fcntl.flock` instead of a stale-lock
-  timeout, closed needs archived, `score ≥ threshold` required in the review record, `--auto-merge=false`,
-  envelope detection moved to the kernel, the supervisor resuming in the need's worktree.
-- **Revision 3** (25/100 in pass 3: all 11 resolved, 3 new): a blocked need releasing its branch to
-  self-engaging siblings; a successor session after `/clear` or a fresh start silenced by a dead
-  binding; F7 wrong (plugin `dependencies` exist).
-- **Revision 4** addresses them: blocked holds the branch (§1, §4); re-binding on `compact`/`clear` and
-  a notice for any other session (§3); F7 corrected and the conductor declares its siblings (§2).
-  Suggestions adopted: every background step under the one-voice rule; evidence bound to the tree it
-  ran on and the review bound to its sha; forge-side branch updates; the forge's up-to-date merge rule;
-  drafts marked ready; `ci: none` declared at `open`; a new need gets its own branch; proving keyed by
-  need; the notification mechanism named; `background_tasks` and scheduled wake-ups as re-entry signals.
+Each revision was scored by a fresh-eyes merge-review subagent that had not seen the discussion.
+
+| Revision | Score | Findings raised | Addressed in |
+|---|---|---|---|
+| 1 | 0/100 | one voice limited to Stop; watcher launch as a script step; forward-only state machine; invariant contradicting undriven behaviour; raw cross-plugin writes; ship-to-prod policy and state in one file; needs keyed on the session; Stop budget stalls; production probe replay; ledger concurrency and GC | 2 and 3 |
+| 2 | 0/100 | skill bodies as a channel; handoff stamps still raw writes; fork stealing the drive; block budget both continuation and breaker; a missing sibling skipping a safety stage; no end state with merging disabled; no producer for gate evidence; no way to halt; the move to `blocked` racing the parallel Stop hooks; the merged-sha claim under squash and base drift; unconstrained production probes | 3 |
+| 3 | 25/100 | a blocked need releasing its branch to self-engaging siblings; a successor after `/clear` or a fresh start silenced by a dead binding; F7 wrong (plugin `dependencies` exist) | 4 |
+| 4 | 75/100 | F5 misread (the cap counts consecutive blocks, reset by any tool call) | 5 |
+
+Revision 3 also adopted `asyncRewake` as a candidate re-entry, `fcntl.flock` instead of a stale-lock
+timeout, archived closed needs, `score ≥ threshold` in the review record, `--auto-merge=false` and
+envelope detection in the kernel. Revision 4 bound background evidence to the tree it ran on and the
+review to its sha, updated drifted branches forge-side, relied on the forge's up-to-date rule, marked
+drafts ready, declared `ci: none` at `open`, gave each new need its own branch and keyed proving by need.
+Revision 5 replaced the per-turn budget with a no-progress breaker, recognised the `/clear` successor by
+process, deferred exits to any session's next prompt, completed the in-flight classification (halt,
+resume, abandon, amendment, new need), added ship-when-done's owner subcommands and the per-session scope
+stamp, and placed ship-to-prod's base-drift handling and policy.
