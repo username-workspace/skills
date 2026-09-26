@@ -212,6 +212,21 @@ This is what the pre-push gate asks for: it denies the **first** push of an unre
 
 ---
 
+
+## Stage protocol (delivery-conductor)
+
+`scripts/review.py stage --repo R --need N --json` answers, read-only, where a need stands in its `reviewing` stage:
+a v1 report with the stage's `state` (`done`, `pending`, `blocked`), its `evidence` (bound to the exact
+work state or sha it was produced on) and the `next` step (`script`, `background` or `skill`). A repo that
+opted this plugin out gets `{"enabled": false}` from it. See `docs/architecture.md` in the marketplace.
+
+The stage is done only with a record for the exact HEAD whose score is at or above the threshold (the
+`--passed` flag alone is not enough). `record --sha <sha>` binds a verdict to the sha that was reviewed;
+without it the record takes HEAD. `handoff --session S --branch B` is how ship-when-done engages the
+pre-push gate for work its session produced (merge-review writes its own state).
+
+---
+
 ## OUTPUT FORMAT
 
 ```markdown

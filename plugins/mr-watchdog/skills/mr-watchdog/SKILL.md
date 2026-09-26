@@ -106,6 +106,20 @@ python3 scripts/watch.py tick   --repo .     # run ONE poll in the foreground (n
 python3 scripts/watch.py verify --repo .     # check the current working-tree fix for fake-green
 ```
 
+Every exit of `run` leaves its verdict in `.git/mr-watchdog-verdict.json` (`green`, `red` with the
+failing log, or `stopped` with the reason), bound to the sha it watched. Launched with `--need N` (by
+delivery-conductor), it prints a neutral verdict line instead of the fix directive: the conductor turns
+the evidence into the next instruction. `handoff --session S --branch B` is how ship-when-done engages the
+watch for a branch its session pushed.
+
+## Stage protocol (delivery-conductor)
+
+`scripts/watch.py stage --repo R --need N --json` answers, read-only, where a need stands in its `ci` stage:
+a v1 report with the stage's `state` (`done`, `pending`, `blocked`), its `evidence` (bound to the exact
+work state or sha it was produced on) and the `next` step (`script`, `background` or `skill`). A repo that
+opted this plugin out gets `{"enabled": false}` from it. See `docs/architecture.md` in the marketplace.
+
+
 ## Dependencies
 
 `git`, Python 3 (stdlib only), and a forge CLI — **`gh`** (GitHub) or **`glab`** (GitLab) — to read CI

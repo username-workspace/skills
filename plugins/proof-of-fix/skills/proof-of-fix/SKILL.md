@@ -63,6 +63,17 @@ python3 scripts/repro.py status                                       # this ses
 python3 scripts/repro.py clear                                        # drop this session's obsolete repro
 ```
 
+`record --need N` binds a repro to a delivery-conductor need (it then escapes the 7-day session GC) and
+prints a neutral line. Every `check` records the work state it ran on and whether the tree held still
+while the probe ran; only such a check counts as proof for a need.
+
+## Stage protocol (delivery-conductor)
+
+`scripts/repro.py stage --repo R --need N --sessions S1,S2 --json` answers, read-only, where a need stands in its `proving` stage (the repros the need's sessions recorded):
+a v1 report with the stage's `state` (`done`, `pending`, `blocked`), its `evidence` (bound to the exact
+work state or sha it was produced on) and the `next` step (`script`, `background` or `skill`). A repo that
+opted this plugin out gets `{"enabled": false}` from it. See `docs/architecture.md` in the marketplace.
+
 Every command acts on the calling session (`CLAUDE_CODE_SESSION_ID`, set in Claude Code's shell). From a
 plain terminal pass `--session <id>`; `status` and `clear` name the sessions holding an open repro.
 
