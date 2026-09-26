@@ -17,9 +17,28 @@ jobs:
       - name: Run plugin test suites
         run: bash scripts/run-tests.sh
 
+  tests-macos:
+    name: tests (stock macOS — /bin/bash 3.2, /usr/bin/python3)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run plugin test suites with nothing but the system toolchain on PATH
+        run: env PATH=/usr/bin:/bin:/usr/sbin:/sbin bash scripts/run-tests.sh
+
+  tests-linux-py39:
+    name: tests (Linux — Python 3.9 floor)
+    runs-on: ubuntu-latest
+    container: python:3.9-bookworm
+    steps:
+      - uses: actions/checkout@v6
+      - name: Trust the checkout (container uid differs from the runner's)
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Run plugin test suites
+        run: bash scripts/run-tests.sh
+
   notify-website:
     name: Redeploy the marketplace site
-    needs: tests
+    needs: [tests, tests-macos, tests-linux-py39]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:

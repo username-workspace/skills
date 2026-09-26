@@ -77,10 +77,14 @@ def load_daily(argv):
         # ccusage accepts a path-separated list and aggregates every matching
         # Claude config directory. This is what makes two macOS accounts work.
         env["CLAUDE_CONFIG_DIR"] = os.pathsep.join(claude_dirs)
-    out = subprocess.run(
-        ["npx", "-y", f"ccusage@{CCUSAGE_VERSION}", "daily", "--json"],
-        capture_output=True, text=True, timeout=180, env=env,
-    )
+    try:
+        out = subprocess.run(
+            ["npx", "-y", f"ccusage@{CCUSAGE_VERSION}", "daily", "--json"],
+            capture_output=True, text=True, timeout=180, env=env,
+        )
+    except FileNotFoundError:
+        sys.stderr.write("ccusage failed: npx not found — the Claude source needs Node.js (npx on PATH)\n")
+        sys.exit(2)
     if out.returncode != 0 or not out.stdout.strip():
         sys.stderr.write("ccusage failed: " + (out.stderr or "no output") + "\n")
         sys.exit(2)

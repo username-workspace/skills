@@ -18,6 +18,8 @@ mkdir -p "$STATE_DIR"
 die(){ echo "x $*" >&2; exit 1; }
 need_claude(){ [ -n "$CLAUDE" ] || die "claude not found (set CRS_CLAUDE_BIN)"; }
 need_script(){ command -v script >/dev/null 2>&1 || die "script(1) not found"; }
+need_procps(){ command -v pgrep >/dev/null 2>&1 && command -v pkill >/dev/null 2>&1 \
+  || die "pgrep/pkill not found — install procps (session liveness, list and stop rely on them)"; }
 spawn_get(){ sed -n "s/^$2=//p" "$STATE_DIR/$1.spawn" 2>/dev/null | head -1; }
 is_running(){ [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
 # liveness = the real PTY/claude process, NOT the wrapper subshell: the subshell is kept alive by
@@ -80,7 +82,7 @@ keepawake_warn(){                                    # one line, once per state 
   local warned="$STATE_DIR/.keepawake-warned"; [ -e "$warned" ] && return 0; : >"$warned"
   if [ "$(uname -s)" = Darwin ]; then
     echo "! keep-awake: can't toggle sleep (no sudo rule) — sessions still run, but the Mac may sleep lid-closed and drop them. Enable once:" >&2
-    echo "    echo '$USER ALL=(root) NOPASSWD: /usr/bin/pmset disablesleep 0, /usr/bin/pmset disablesleep 1' | sudo tee $KEEPAWAKE_SUDOERS >/dev/null && sudo chmod 440 $KEEPAWAKE_SUDOERS" >&2
+    echo "    echo '${USER:-$(id -un)} ALL=(root) NOPASSWD: /usr/bin/pmset disablesleep 0, /usr/bin/pmset disablesleep 1' | sudo tee $KEEPAWAKE_SUDOERS >/dev/null && sudo chmod 440 $KEEPAWAKE_SUDOERS" >&2
     echo "    (or CRS_KEEPAWAKE=0 to silence)" >&2
   else
     echo "! keep-awake: 'systemd-inhibit' not found — sessions still run, but this host may sleep and drop them. Install systemd, or CRS_KEEPAWAKE=0 to silence." >&2
@@ -138,8 +140,8 @@ launch_session(){
   set -m
   case "$(uname -s)" in
     Darwin) ( export TERM=xterm-256color; session_stdin "$log" | script -q "$log" "$CLAUDE" --remote-control "$name" "$@" $PERM ) >/dev/null 2>&1 & ;;
-    Linux)  local cmd; printf -v cmd '%q ' "$CLAUDE" --remote-control "$name" "$@" $PERM
-            ( export TERM=xterm-256color; session_stdin "$log" | script -qec "$cmd" "$log" ) >/dev/null 2>&1 & ;;
+    Linux)  local cmd; printf -v cmd '%q ' "$CLAUDE" --remote-control "$name" "$@" $PERM   # %q is bash syntax: script -c runs it via $SHELL
+            ( export TERM=xterm-256color; session_stdin "$log" | SHELL="$BASH" script -qec "$cmd" "$log" ) >/dev/null 2>&1 & ;;
     *)      set +m; die "unsupported OS $(uname -s)" ;;
   esac
   local leader=$!
@@ -223,7 +225,7 @@ case "${1:-}" in
 esac
 case "$cmd" in
   spawn)
-    need_claude; need_script
+    need_claude; need_script; need_procps
     name=""; model=""; prompt=""
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -250,7 +252,7 @@ case "$cmd" in
     echo "spawned '$name'${model:+ (model: $model)} in $cwd — visible in Claude Code Remote Control (phone/desktop) + 'claude agents'." >&2
     ;;
   open)
-    need_claude
+    need_claude; need_procps
     name=""; model=""; prompt=""
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -300,7 +302,7 @@ case "$cmd" in
     echo "opened '$name'${model:+ (model: $model)} in a new terminal tab (cwd: $cwd) — live & Remote-Control-drivable while the tab stays open; 'stop $name' or closing the tab ends it (the tab then closes itself)." >&2
     ;;
   resume)
-    need_claude; need_script
+    need_claude; need_script; need_procps
     id=""; name=""; fork="--fork-session"; model=""
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -367,6 +369,7 @@ case "$cmd" in
   check)
     echo "claude : $([ -n "$CLAUDE" ] && "$CLAUDE" --version 2>/dev/null || echo 'NOT FOUND')"
     echo "script : $(command -v script >/dev/null 2>&1 && echo ok || echo 'NOT FOUND')"
+    echo "procps : $(command -v pgrep >/dev/null 2>&1 && command -v pkill >/dev/null 2>&1 && echo ok || echo 'NOT FOUND (pgrep/pkill — install procps)')"
     echo "perms  : $PERM"
     mh="$({ "$CLAUDE" --help 2>/dev/null | grep -aA3 -- '--model <model>' | tr '\n' ' ' | tr -s ' ' | sed 's/.*--model <model> *//'; } 2>/dev/null || true)"
     echo "model  : 'spawn --model <alias|id>' — passed to 'claude --model', validated there. ${mh:-run 'claude --help' for current aliases}"
