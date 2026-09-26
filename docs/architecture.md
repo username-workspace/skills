@@ -121,7 +121,7 @@ plugin degrades to inert rather than crash.
 | `merge-review-gate.json` | merge-review | the pre-push gate's once-per-HEAD block dedup |
 | `mr-watchdog-session.json` | mr-watchdog | session baselines (engagement) |
 | `mr-watchdog-watch.json` | mr-watchdog | per-HEAD watch dedup |
-| `proof-of-fix.json` | proof-of-fix | the active repro (command + recorded red verdict) |
+| `proof-of-fix.json` | proof-of-fix | each session's active repro (command + recorded red verdict) |
 
 This lists the coupling and observability state. Per-session nudge-dedup markers (e.g.
 `proof-of-fix-nudge.json`) and the trusted config files (`.git/<plugin>.json`, §8) live under `.git/`
