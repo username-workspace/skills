@@ -37,7 +37,8 @@ def main():
     if not repo:
         return
     try:
-        r = subprocess.run([sys.executable, script, "gate", "--repo", repo, "--session", session],
+        r = subprocess.run([sys.executable, script, "gate", "--repo", repo, "--session", session,
+                            "--prompt-id", payload.get("prompt_id") or ""],
                            timeout=25, capture_output=True, text=True)
         if r.stdout.strip():
             sys.stdout.write(r.stdout)

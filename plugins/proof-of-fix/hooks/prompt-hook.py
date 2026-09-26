@@ -18,7 +18,9 @@ def main():
     try:
         r = subprocess.run([sys.executable, script, "nudge", "--repo", cwd,
                             "--session", payload.get("session_id") or "",
-                            "--prompt", (payload.get("prompt") or "")[:4000]],
+                            "--prompt", (payload.get("prompt") or "")[:4000],
+                            "--prompt-id", payload.get("prompt_id") or "",
+                            "--transcript", payload.get("transcript_path") or ""],
                            timeout=15, capture_output=True, text=True)
         if r.stdout.strip():
             sys.stdout.write(r.stdout)

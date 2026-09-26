@@ -246,7 +246,7 @@ def cmd_gate(args):
     if blk.get("session") == args.session and blk.get("head") == head:
         return
     write_gate_block(repo, {"session": args.session, "head": head})
-    reason = DRIVEN_REASON if driven(repo, args.session) else gate_reason(repo, cfg)
+    reason = DRIVEN_REASON if driven(repo, args.session, args.prompt_id) else gate_reason(repo, cfg)
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                               "permissionDecision": "deny",
                                               "permissionDecisionReason": reason}}))
@@ -401,7 +401,7 @@ def main():
 
     common("baseline", cmd_baseline)
     common("engaged", cmd_engaged)
-    common("gate", cmd_gate)
+    common("gate", cmd_gate).add_argument("--prompt-id", default="")
     common("prior", cmd_prior)
     common("verify", cmd_verify)
     c = common("context", cmd_context)

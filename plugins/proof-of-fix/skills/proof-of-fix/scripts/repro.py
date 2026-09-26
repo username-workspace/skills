@@ -152,7 +152,7 @@ def cmd_nudge(args):
     prompt = args.prompt or ""
     if ENVELOPE_RE.match(prompt) or not INTENT_RE.search(prompt):
         return
-    if not os.path.isdir(git_dir(repo)) or conductor_scope(repo, args.session):
+    if not os.path.isdir(git_dir(repo)) or conductor_scope(repo, args.session, args.prompt_id, args.transcript):
         return
     marker = os.path.join(git_dir(repo), "proof-of-fix-nudge.json")
     st = _kernel.read_sessions(marker)
@@ -173,7 +173,7 @@ def cmd_hook(args):
     st = read_repro(repo, sid)
     if not st or st.get("status") != "open" or not st.get("cmd"):
         return
-    if load_config(repo).get("enabled", True) is False or driven(repo, sid):
+    if load_config(repo).get("enabled", True) is False or driven(repo, sid, args.prompt_id):
         return
     head, dirty = work_state(repo)
     nag = st.get("nag") or {}
@@ -215,9 +215,10 @@ def main():
     common("check", cmd_check)
     common("status", cmd_status)
     common("clear", cmd_clear)
-    common("hook", cmd_hook)
+    common("hook", cmd_hook).add_argument("--prompt-id", default="")
     n = common("nudge", cmd_nudge)
-    n.add_argument("--prompt", default="")
+    n.add_argument("--prompt", default=""); n.add_argument("--prompt-id", default="")
+    n.add_argument("--transcript", default="")
 
     args = ap.parse_args()
     if getattr(args, "repo", None) is not None:

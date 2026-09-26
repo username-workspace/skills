@@ -804,7 +804,7 @@ def cmd_engage(args):
         return
     repo = os.path.abspath(args.repo)
     cfg = load_config(repo, args.config)
-    if driven(repo, args.session) or not engaged(repo, cfg, args.session):
+    if driven(repo, args.session, args.prompt_id) or not engaged(repo, cfg, args.session):
         return
     if args.goal:
         cfg["goal"] = args.goal
@@ -915,7 +915,7 @@ def main():
     e = sub.add_parser("engage")
     e.add_argument("--repo", default="."); e.add_argument("--config"); e.add_argument("--goal", default="")
     e.add_argument("--last-message", default=""); e.add_argument("--todos-done", action="store_true")
-    e.add_argument("--session", default="")
+    e.add_argument("--session", default=""); e.add_argument("--prompt-id", default="")
     e.set_defaults(fn=cmd_engage)
     b = sub.add_parser("baseline")
     b.add_argument("--repo", default="."); b.add_argument("--config"); b.add_argument("--session", default="")

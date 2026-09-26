@@ -316,16 +316,58 @@ def read_ledger(repo):
     return "corrupt", None
 
 
-def conductor_scope(repo, session):
-    return session in read_sessions(os.path.join(git_dir(repo), "conductor-scope.json"))["sessions"]
+def live_path(repo):
+    return os.path.join(git_dir(repo), "conductor-live.json")
 
 
-def driven(repo, session):
+def stamp_live(repo, session, prompt_id, scope):
+    """delivery-conductor refreshes this from each of its hooks: proof that it runs in `session` at
+    `prompt_id`. A conductor that stops running (disabled, uninstalled) stops refreshing it."""
+    st = read_sessions(live_path(repo))
+    st["sessions"][session] = {"started": datetime.now(timezone.utc).isoformat(), "prompt_id": prompt_id or "",
+                               "scope": bool(scope), "pid": os.environ.get("CLAUDE_PID", "")}
+    write_sessions(live_path(repo), st)
+
+
+def previous_prompt_id(transcript, prompt_id):
+    """The prompt before `prompt_id` in the transcript ('' before the first one), None if unreadable.
+    Every entry of a turn carries its promptId, so the tail nearly always holds the previous turn."""
+    try:
+        size = os.path.getsize(transcript)
+        with open(transcript, "rb") as f:
+            for start in (max(0, size - 1048576), 0):
+                f.seek(start)
+                ids = [i for i in re.findall(r'"promptId":\s*"([^"]+)"', f.read().decode("utf-8", "ignore"))
+                       if i != prompt_id]
+                if ids or start == 0:
+                    return ids[-1] if ids else ""
+    except (OSError, TypeError):
+        return None
+
+
+def conductor_live(repo, session, prompt_id, transcript=None, at_prompt=False):
+    """The conductor's stamp when it ran for this prompt. A UserPromptSubmit caller runs in parallel
+    with the conductor's own hook, so it also accepts the stamp of the prompt just before."""
+    st = read_sessions(live_path(repo))["sessions"].get(session) or {}
+    last = st.get("prompt_id")
+    if last is None or not prompt_id:
+        return None
+    if last == prompt_id or (at_prompt and last == previous_prompt_id(transcript, prompt_id)):
+        return st
+    return None
+
+
+def conductor_scope(repo, session, prompt_id, transcript):
+    st = conductor_live(repo, session, prompt_id, transcript, at_prompt=True)
+    return bool(st and st.get("scope"))
+
+
+def driven(repo, session, prompt_id):
     """True while delivery-conductor holds the current branch for a need: every sibling stands down on
-    it. Only a session carrying the conductor's scope stamp is driven, so a ledger left behind by a
-    disabled conductor is inert; a corrupt ledger under a live conductor holds every branch."""
+    it. Only while the conductor runs for this very prompt, so a ledger left behind by a disabled
+    conductor is inert; a corrupt ledger under a running conductor holds every branch."""
     status, ledger = read_ledger(repo)
-    if status == "absent" or not conductor_scope(repo, session):
+    if status == "absent" or not conductor_live(repo, session, prompt_id):
         return False
     if status == "corrupt":
         return True
