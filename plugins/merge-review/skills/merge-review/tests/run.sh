@@ -227,4 +227,36 @@ rb="$ROOT/resolveB"; mkrepo "$rb"; topb="$(git -C "$rb" rev-parse --show-topleve
 "$PY" "$RV" baseline --repo "$sub" --session s1
 [ -f "$top/.git/merge-review-session.json" ] && ok "root-anchor: baseline from subdir → state at repo root" || ko "root-anchor subdir"
 
+# --- stage protocol: the reviewing stage is a record for the exact HEAD with score >= threshold ----
+sg(){ "$PY" "$RV" stage --repo "$1" --need N1 | "$PY" -c 'import json,sys; d=json.load(sys.stdin)
+print(d["v"], d["stage"], d["state"], d["next"]["kind"])'; }
+d="$ROOT/stage"; mkrepo "$d"; git -C "$d" checkout -q -b feat; work "$d"
+assert_eq "1 reviewing pending skill" "$(sg "$d")" "stage: no record → a review step"
+case "$("$PY" "$RV" stage --repo "$d" --need N1)" in *"--sha $(git -C "$d" rev-parse HEAD)"*) ok "stage: the step records for the exact sha";; *) ko "stage: record --sha";; esac
+"$PY" "$RV" record --repo "$d" --score 60 --passed >/dev/null
+assert_eq "1 reviewing blocked skill" "$(sg "$d")" "stage: a --passed flag below the threshold is not a pass"
+"$PY" "$RV" record --repo "$d" --score 90 >/dev/null
+assert_eq "1 reviewing done none" "$(sg "$d")" "stage: score >= threshold at HEAD → done"
+reviewed=$(git -C "$d" rev-parse HEAD); work "$d"
+assert_eq "1 reviewing pending skill" "$(sg "$d")" "stage: a new HEAD makes the record stale"
+"$PY" "$RV" record --repo "$d" --score 95 --sha "$reviewed" >/dev/null
+assert_eq "$reviewed" "$("$PY" "$RV" prior --repo "$d" | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["head"])')" \
+  "record --sha: the verdict is bound to the reviewed sha, not to HEAD"
+assert_eq "1 reviewing pending skill" "$(sg "$d")" "stage: a record for another sha never passes HEAD"
+
+# --- presence is not enablement: prepush_gate:false still stamps presence, flagged off ---------------
+d="$ROOT/presence"; mkrepo "$d"; git -C "$d" checkout -q -b feat
+printf '{"prepush_gate":false}' > "$d/.git/merge-review.json"
+"$PY" "$RV" baseline --repo "$d" --session s1
+assert_eq "False $("$PY" -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$RV")" "$("$PY" -c 'import json,os,sys; d=json.load(open(sys.argv[1])); print(d["prepush_gate"], os.path.realpath(d["script"]))' "$d/.git/merge-review-session.json")" \
+  "baseline: present and enabled, push hold flagged off"
+printf '{"enabled":false}' > "$d/.git/merge-review.json"; rm -f "$d/.git/merge-review-session.json"
+"$PY" "$RV" baseline --repo "$d" --session s1
+[ -f "$d/.git/merge-review-session.json" ] && ko "baseline: enabled:false stamps nothing" || ok "baseline: enabled:false stamps nothing"
+
+# --- handoff: ship-when-done engages merge-review through merge-review's own CLI --------------------
+d="$ROOT/handoff"; mkrepo "$d"; git -C "$d" checkout -q -b feat; work "$d"
+"$PY" "$RV" handoff --repo "$d" --session s9 --branch feat
+assert_eq "yes" "$("$PY" "$RV" engaged --repo "$d" --session s9)" "handoff: the stamped branch is engaged"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]

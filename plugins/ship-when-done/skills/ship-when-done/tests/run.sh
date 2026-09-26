@@ -17,10 +17,10 @@ echo "\$@" >> "$GH_LOG"
 key="\$(pwd | tr '/' '_')"
 case "\$1 \$2" in
   "pr merge") echo "MERGE-CALLED \$@" >> "$GH_LOG"; exit 0;;
-  "pr view") if [ -f "$ROOT/pr-\$key-\$3" ]; then echo '{"state":"OPEN"}'; exit 0; else echo "no pull requests found" >&2; exit 1; fi;;
+  "pr view") if [ -f "$ROOT/pr-\$key-\$(echo "\$3" | tr / _)" ]; then echo '{"state":"OPEN","url":"https://example.test/pr/1"}'; exit 0; else echo "no pull requests found" >&2; exit 1; fi;;
   "pr create")
      head=""; while [ \$# -gt 0 ]; do [ "\$1" = "--head" ] && head="\$2"; shift; done
-     [ -n "\$head" ] && touch "$ROOT/pr-\$key-\$head"
+     [ -n "\$head" ] && touch "$ROOT/pr-\$key-\$(echo "\$head" | tr / _)"
      echo "https://example.test/pr/1"; exit 0;;
   *) exit 0;;
 esac
@@ -711,6 +711,69 @@ python3 "$SHIP" mark-done --repo "$d" --summary x >/dev/null 2>&1 \
 [ -f "$d/.git/swd-done.json" ] && ko "EXP. no marker written on detached HEAD" || ok "EXP. no marker written on detached HEAD"
 
 echo
+# --- N. the stage protocol: the owner steps a need's conductor sequences, and what each stage reports --
+st(){ python3 "$SHIP" stage --repo "$1" --need N1 --stage "$2" --summary "the need" --type feat \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["v"], d["state"], d["next"]["kind"], " ".join(d["next"].get("run", [])[2:3]))'; }
+d="$ROOT/need"; new_repo "$d" --remote; git -C "$d" checkout -q -b need/n1
+printf '{"gate":"test -f ok.txt"}' > "$d/.git/ship-when-done.json"
+assert_eq "1 pending none " "$(st "$d" implementing)" "N. nothing implemented yet → no owner step"
+echo w > "$d/w.txt"
+assert_eq "1 pending script commit" "$(st "$d" implementing)" "N. uncommitted work → the milestone commit"
+assert_contains '"committed": true' "$(python3 "$SHIP" commit --repo "$d" --need N1 --summary "the need" --type feat)" "N. commit: the work is committed"
+assert_eq "feat: the need" "$(git -C "$d" log -1 --format=%s)" "N. commit: a conventional message from the contract"
+assert_eq "1 done none " "$(st "$d" implementing)" "N. committed → implementing done"
+assert_eq "1 pending background gate" "$(st "$d" gating)" "N. no gate evidence → the gate, in the background"
+python3 "$SHIP" gate --repo "$d" --need N1 >/dev/null; rc=$?
+assert_eq 1 "$rc" "N. gate: red → exit 1"
+assert_eq "1 blocked skill " "$(st "$d" gating)" "N. red at this work state → a fix step"
+touch "$d/ok.txt"
+assert_eq "1 pending background gate" "$(st "$d" gating)" "N. the tree moved → the red verdict no longer counts"
+python3 "$SHIP" gate --repo "$d" --need N1 >/dev/null
+assert_eq "1 done none " "$(st "$d" gating)" "N. green at this work state → done"
+printf '{"gate":"echo x >> drift.txt"}' > "$d/.git/ship-when-done.json"
+out=$(python3 "$SHIP" gate --repo "$d" --need N1); rc=$?
+assert_contains 'stale' "$out" "N. a tree that moved while the gate ran → stale, never a pass"
+assert_eq 1 "$rc" "N. stale → exit 1"
+rm -f "$d/drift.txt"; printf '{"gate":"true"}' > "$d/.git/ship-when-done.json"
+python3 "$SHIP" commit --repo "$d" --need N1 --summary "the need" --type feat >/dev/null
+assert_eq "1 pending script mark-done" "$(st "$d" shipping)" "N. not declared → mark-done first"
+python3 "$SHIP" mark-done --repo "$d" --summary "the need" --type feat >/dev/null
+printf '{"v":1,"sessions":{},"script":"x","prepush_gate":true}' > "$d/.git/merge-review-session.json"
+out=$(python3 "$SHIP" push --repo "$d" --need N1); rc=$?
+assert_contains 'merge-review-pending' "$out" "N. push: held while no review passed this HEAD (the Stop-time safety net)"
+assert_eq 1 "$rc" "N. push held → exit 1"
+printf '{"head":"%s","passed":true,"score":95}' "$(git -C "$d" rev-parse HEAD)" > "$d/.git/merge-review-state.json"
+assert_eq "1 pending script push" "$(st "$d" shipping)" "N. declared, not pushed → push"
+python3 "$SHIP" push --repo "$d" --need N1 >/dev/null
+assert_eq "$(git -C "$d" rev-parse HEAD)" "$(git -C "$d.git" rev-parse need/n1 2>/dev/null)" "N. push: the branch reached the remote"
+assert_eq "1 pending script open-pr" "$(st "$d" shipping)" "N. pushed, no PR → open-pr"
+before=$(wc -l < "$GH_LOG")
+out=$(python3 "$SHIP" open-pr --repo "$d" --need N1)
+calls=$(sed -n "$((before + 1)),\$p" "$GH_LOG")
+assert_contains '"pr": "https://example.test/pr/1"' "$out" "N. open-pr: the PR's url is the evidence"
+assert_contains 'pr create --base main --head need/n1 --title feat: the need' "$calls" "N. open-pr: titled from the declaration"
+assert_contains '--draft' "$calls" "N. open-pr: a draft"
+[ -f "$d/.git/swd-done.json" ] && ko "N. open-pr consumes the declaration" || ok "N. open-pr consumes the declaration"
+assert_eq "1 done none " "$(st "$d" shipping)" "N. shipping done"
+assert_contains 'no-done-marker' "$(python3 "$SHIP" open-pr --repo "$d" --need N1)" "N. open-pr without a declaration is refused"
+assert_eq "1 pending script mark-ready" "$(st "$d" ready)" "N. a draft → mark-ready"
+python3 "$SHIP" mark-ready --repo "$d" --need N1 >/dev/null
+assert_contains 'pr ready need/n1' "$(cat "$GH_LOG")" "N. mark-ready: the draft is marked ready for review"
+assert_eq "1 done none " "$(st "$d" ready)" "N. marked ready → done"
+echo fix > "$d/fix.txt"; python3 "$SHIP" commit --repo "$d" --need N1 --summary "ci fix" --type fix >/dev/null
+printf '{"head":"%s","passed":true,"score":95}' "$(git -C "$d" rev-parse HEAD)" > "$d/.git/merge-review-state.json"
+assert_eq "1 pending script push" "$(st "$d" shipping)" "N. a new HEAD re-enters shipping at the push, the PR kept"
+git -C "$d" checkout -q main; echo x > "$d/x.txt"
+assert_contains 'on-default-branch' "$(python3 "$SHIP" commit --repo "$d" --need N1)" "N. commit refuses the trunk"
+assert_contains 'on-default-branch' "$(python3 "$SHIP" push --repo "$d" --need N1)" "N. push refuses the trunk"
+rm -f "$d/x.txt"; git -C "$d" checkout -q need/n1
+python3 "$SHIP" mark-done --repo "$d" --summary again >/dev/null
+python3 "$SHIP" clear-done --repo "$d" >/dev/null
+[ -f "$d/.git/swd-done.json" ] && ko "N. clear-done removes the declaration (release)" || ok "N. clear-done removes the declaration (release)"
+printf '{"v":1,"sessions":{},"script":"x","prepush_gate":false}' > "$d/.git/merge-review-session.json"
+rm -f "$d/.git/merge-review-state.json"
+assert_contains '"pushed": true' "$(python3 "$SHIP" push --repo "$d" --need N1)" "N. merge-review present with prepush_gate off → no push hold"
+
 echo "PASS=$PASS FAIL=$FAIL"
 rm -rf "$ROOT"
 [ "$FAIL" -eq 0 ]

@@ -414,4 +414,26 @@ assert_eq 3600 "$(cfgnum "$d" watch_timeout)" "15. non-numeric watch_timeout →
 printf '{"poll_interval":5}' > "$d/.mr-watchdog.json"
 assert_eq 5 "$(cfgnum "$d" poll_interval)" "15. a valid numeric override is preserved"
 
+# 16. the stage protocol: the watcher leaves its verdict bound to the sha it watched, prints a neutral
+# line under a need, and the ci stage reads that evidence
+sg(){ python3 "$WATCH" stage --repo "$1" --need N1 | python3 -c 'import json,sys; d=json.load(sys.stdin)
+print(d["v"], d["stage"], d["state"], d["next"]["kind"], " ".join(d["next"].get("run", [])[2:4]))'; }
+d="$ROOT/stage"; new_repo "$d"; printf '{"poll_interval":1}' > "$d/.mr-watchdog.json"
+assert_eq "1 ci pending background run --need" "$(sg "$d")" "16. no verdict → the background watcher, need token first"
+out=$(STUB_CI=failed python3 "$WATCH" run --need N1 --repo "$d" 2>&1); rc=$?
+assert_absent 'ROOT CAUSE' "$out" "16. red under a need: a neutral line, no instruction"
+assert_eq 1 "$rc" "16. red under a need: still exit 1"
+assert_eq "1 ci blocked skill " "$(sg "$d")" "16. red at HEAD → a fix step"
+assert_contains 'AssertionError' "$(python3 "$WATCH" stage --repo "$d" --need N1)" "16. the fix step carries the failing log"
+out=$(STUB_CI=success python3 "$WATCH" run --need N1 --repo "$d" 2>&1)
+assert_absent 'ok, all good' "$out" "16. green under a need: a neutral line"
+assert_eq "1 ci done none " "$(sg "$d")" "16. green at HEAD → done"
+git -C "$d" commit -q --allow-empty -m next
+assert_eq "1 ci pending background run --need" "$(sg "$d")" "16. a new HEAD makes the verdict stale"
+STUB_MR_STATE=CLOSED python3 "$WATCH" run --repo "$d" >/dev/null 2>&1
+assert_contains '"verdict": "stopped"' "$(cat "$d/.git/mr-watchdog-verdict.json")" "16. a watcher that stops leaves its verdict too"
+python3 "$WATCH" handoff --repo "$d" --session S9 --branch feat
+assert_eq yes "$(env -u HARNESS_AUTO_ENGAGE python3 "$WATCH" engaged --repo "$d" --session S9)" \
+  "16. handoff engages the branch through mr-watchdog's own CLI"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]

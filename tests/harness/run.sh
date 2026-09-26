@@ -455,4 +455,36 @@ printf '{"threshold":70}' > "$(git -C "$w" rev-parse --git-dir)/merge-review.jso
 assert_eq 70 "$(review_threshold "$w")" "17. a worktree's own git dir may still override the repo's config"
 assert_eq 95 "$(review_threshold "$dW")" "17. that override stays in its worktree"
 
+# --- 18. owner CLIs for every cross-plugin write: ship-when-done hands engagement to the siblings
+# through their own `handoff`; merge-review present with prepush_gate off never holds the push --------
+d="$ROOT/b17"; new_repo "$d" --remote
+printf '{"gate":"true"}' > "$d/.git/ship-when-done.json"; printf '{"prepush_gate":false}' > "$d/.git/merge-review.json"
+prompt_baselines "$d" s17
+echo g > "$d/g.txt"
+python3 "$SHIP" mark-done --repo "$d" --summary "ship the gizmo" --type feat >/dev/null
+stop_payload "$d" s17 "$tp" false | CLAUDE_PLUGIN_ROOT="$SHIP_PLUGIN" python3 "$SHIP_HOOK" >/dev/null
+git -C "$d.git" rev-parse --verify -q zv-9-work >/dev/null && ok "18. prepush_gate off: pushed with no review hold" \
+  || ko "18. prepush_gate off: pushed with no review hold"
+handed(){ python3 -c 'import json,sys; st=json.load(open(sys.argv[1]))
+print(((st["sessions"].get("s17") or {}).get("branches") or {}).get("zv-9-work", {}).get("engaged"))' "$1"; }
+assert_eq True "$(handed "$d/.git/merge-review-session.json")" "18. merge-review engaged through review.py handoff"
+assert_eq True "$(handed "$d/.git/mr-watchdog-session.json")" "18. mr-watchdog engaged through watch.py handoff"
+
+# --- 19. discovery: after one prompt every owner's script path is stamped in .git, and a repo that opted
+# an owner out hears it from that owner's own stage CLI, never from a stamp that may be stale ------------
+REPRO="$REPO_ROOT/plugins/proof-of-fix/skills/proof-of-fix/scripts/repro.py"
+d="$ROOT/b18"; new_repo "$d" --remote; git -C "$d" checkout -q -b need/n1
+prompt_baselines "$d" s18; python3 "$REPRO" nudge --repo "$d" --session s18 --prompt "hello" >/dev/null
+for f in swd-session merge-review-session mr-watchdog-session proof-of-fix; do
+  s=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("script",""))' "$d/.git/$f.json" 2>/dev/null)
+  [ -n "$s" ] && [ -f "$s" ] && ok "19. $f stamps its owner's script path" || ko "19. $f stamps its owner's script path"
+done
+printf '{"enabled":false}' > "$d/.ship-when-done.json"; printf '{"enabled":false}' > "$d/.git/merge-review.json"
+printf '{"enabled":false}' > "$d/.mr-watchdog.json"; printf '{"enabled":false}' > "$d/.proof-of-fix.json"
+optout(){ "$@" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["state"], d["evidence"].get("enabled"))'; }
+assert_eq "blocked False" "$(optout python3 "$SHIP" stage --repo "$d" --need N --stage gating)" "19. ship-when-done opted out → its stage says so"
+assert_eq "blocked False" "$(optout python3 "$REVIEW" stage --repo "$d" --need N)" "19. merge-review opted out → its stage says so"
+assert_eq "blocked False" "$(optout python3 "$WATCH" stage --repo "$d" --need N)" "19. mr-watchdog opted out → its stage says so"
+assert_eq "blocked False" "$(optout python3 "$REPRO" stage --repo "$d" --need N)" "19. proof-of-fix opted out → its stage says so"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]

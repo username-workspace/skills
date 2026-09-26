@@ -221,8 +221,10 @@ def read_sessions(path):
 
 
 def write_sessions(path, st):
+    """A need-bound entry is never collected: a need can wait longer than the session GC."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=SESSION_GC_DAYS)).isoformat()
-    st["sessions"] = {k: v for k, v in st["sessions"].items() if (v.get("started") or cutoff) >= cutoff}
+    st["sessions"] = {k: v for k, v in st["sessions"].items()
+                      if v.get("need") or (v.get("started") or cutoff) >= cutoff}
     try:
         write_json(path, st)
     except OSError:
@@ -309,6 +311,13 @@ def marker_for_branch(repo, branch):
     branch. Inert when the sibling is absent."""
     m = read_marker(repo)
     return bool(m and m.get("branch") == branch)
+
+
+def stage_report(stage, state, evidence=None, kind="none", **step):
+    """The v1 answer of a plugin's read-only `stage` CLI. state: done | pending | blocked. next.kind:
+    none, script (run by the conductor), background (launched by the model with run_in_background) or
+    skill (a judgment step for the model, described by `instruction`)."""
+    return {"v": 1, "stage": stage, "state": state, "evidence": evidence or {}, "next": dict(step, kind=kind)}
 
 
 def ledger_path(repo):

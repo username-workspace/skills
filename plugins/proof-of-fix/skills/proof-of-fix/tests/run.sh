@@ -161,4 +161,38 @@ out=$(python3 "$REPRO" clear --repo "$d11" --session X 2>&1); rc=$?
 assert_eq 0 "$rc" "10. clear --session X → clears X's repro"
 assert_eq "{}" "$(python3 "$REPRO" status --repo "$d11" --session X 2>/dev/null)" "10. X's repro is gone"
 
+# --- 11. the stage protocol: a need's proving stage, bound to the work state it was checked on -------
+stage(){ python3 "$REPRO" stage --repo "$1" --need N1 --sessions "$2" | python3 -c 'import json,sys; d=json.load(sys.stdin)
+print(d["v"], d["stage"], d["state"], d["next"]["kind"], " ".join(d["next"].get("run", [])[2:4]))'; }
+d12="$ROOT/t12"; mkrepo "$d12"
+assert_eq "1 proving done none " "$(stage "$d12" A)" "11. no repro recorded by the need's sessions → done"
+out=$(python3 "$REPRO" record --repo "$d12" --session A --need N1 --cmd "test -f fixed.txt" 2>&1)
+assert_absent 'fix the root cause' "$out" "11. record under a need prints a neutral line, no instruction"
+assert_contains '"need": "N1"' "$(python3 "$REPRO" status --repo "$d12" --session A)" "11. the repro is bound to its need"
+assert_eq "1 proving pending background check --need" "$(stage "$d12" B,A)" "11. unchecked repro → the background check, need token first"
+python3 "$REPRO" check --repo "$d12" --session A --need N1 >/dev/null 2>&1
+assert_eq "1 proving blocked skill " "$(stage "$d12" A)" "11. checked red at this work state → a fix step"
+touch "$d12/fixed.txt"
+assert_eq "1 proving pending background check --need" "$(stage "$d12" A)" "11. the tree moved → the red check no longer counts"
+python3 "$REPRO" check --repo "$d12" --session A --need N1 >/dev/null 2>&1
+assert_eq "1 proving done none " "$(stage "$d12" A)" "11. checked green at this work state → done"
+echo more > "$d12/other.txt"
+assert_eq "1 proving pending background check --need" "$(stage "$d12" A)" "11. a later change makes the green check stale"
+d13="$ROOT/t13"; mkrepo "$d13"
+echo 0 > "$d13/run.log"; git -C "$d13" add -A; git -C "$d13" commit -qm log
+python3 "$REPRO" record --repo "$d13" --session A --need N1 --cmd 'echo x >> run.log; test -f fixed.txt' >/dev/null 2>&1
+touch "$d13/fixed.txt"
+python3 "$REPRO" check --repo "$d13" --session A --need N1 >/dev/null 2>&1
+assert_eq "1 proving pending background check --need" "$(stage "$d13" A)" "11. a probe that moved the tree while it ran proves nothing"
+python3 - "$d13/.git/proof-of-fix.json" "$(dirname "$REPRO")" <<'PY'
+import json, sys
+sys.path.insert(0, sys.argv[2]); import _kernel
+st = json.load(open(sys.argv[1]))
+st["sessions"]["A"]["started"] = "2000-01-01T00:00:00+00:00"
+st["sessions"]["old"] = {"started": "2000-01-01T00:00:00+00:00", "cmd": "false"}
+_kernel.write_sessions(sys.argv[1], st)
+PY
+kept=$(python3 -c 'import json,sys; print(" ".join(sorted(json.load(open(sys.argv[1]))["sessions"])))' "$d13/.git/proof-of-fix.json")
+assert_eq "A" "$kept" "11. the session GC keeps a need-bound repro and collects the stale one"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]
