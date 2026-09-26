@@ -121,7 +121,7 @@ plugin degrades to inert rather than crash.
 | `merge-review-gate.json` | merge-review | the pre-push gate's once-per-HEAD block dedup |
 | `mr-watchdog-session.json` | mr-watchdog | session baselines (engagement) |
 | `mr-watchdog-watch.json` | mr-watchdog | per-HEAD watch dedup |
-| `proof-of-fix.json` | proof-of-fix | the active repro (command + recorded red verdict) |
+| `proof-of-fix.json` | proof-of-fix | each session's active repro (command + recorded red verdict) |
 
 This lists the coupling and observability state. Per-session nudge-dedup markers (e.g.
 `proof-of-fix-nudge.json`) and the trusted config files (`.git/<plugin>.json`, §8) live under `.git/`
@@ -191,7 +191,9 @@ Auto is **scoped** — outside the scope a plugin falls back to explicit (a decl
 - a session launched outside a git work tree (`CLAUDE_PROJECT_DIR`, e.g. `$HOME`) has no project to
   infer from — it may touch many repos, none of which it was started for;
 - `HARNESS_AUTO_ENGAGE_EXCLUDE` (paths separated by `os.pathsep`) lists trees that carry their own
-  delivery harness: a repo under one, or a session launched under one, stays explicit.
+  delivery harness: a repo under one, or a session launched under one, stays explicit. Entries are
+  matched by filesystem identity (case and symlinks included); an entry that is not absolute after
+  `~`/`$VAR` expansion cannot be honoured and turns auto off everywhere (fail closed).
 
 This makes auto a safe user-wide default: set both variables once in `~/.claude/settings.json`
 (`env`) and every new side project engages on its own, while the excluded trees and ad-hoc sessions

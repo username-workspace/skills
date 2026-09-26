@@ -223,8 +223,8 @@ def auto_engage(repo):
     (baseline deltas, provenance ∩ branch content, upstream advance), scoped: a session launched
     outside a git work tree (CLAUDE_PROJECT_DIR, e.g. $HOME) has no project to infer from, and a
     launch dir or repo under a path of HARNESS_AUTO_ENGAGE_EXCLUDE (os.pathsep-separated, ~ and $VAR
-    expanded — repos that carry their own delivery harness) stays explicit; an entry that still is not
-    an absolute path cannot be honoured, so auto stays off. Truthy allowlist: the truthy side takes
+    expanded — repos that carry their own delivery harness) stays explicit; an entry that is not an
+    absolute path after expansion, or still holds a `$`, cannot be honoured, so auto stays off. Truthy allowlist: the truthy side takes
     autonomous actions, so an unrecognized value must mean OFF."""
     if os.environ.get("HARNESS_AUTO_ENGAGE", "").lower() not in ("1", "true"):
         return False

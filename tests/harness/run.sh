@@ -372,4 +372,53 @@ python3 "$SHIP" mark-done --repo "$dF" --summary w >/dev/null
 assert_eq "yes" "$(env -u HARNESS_AUTO_ENGAGE python3 "$REVIEW" engaged --repo "$dF" --session sf)" \
   "15. declared delivery in flight → the pre-push gate arms"
 
+# --- 16. E2E ledger staleness tracks the plugins the lane exercises, not the whole marketplace -------
+dL="$ROOT/ledger"; new_repo "$dL"
+mkdir -p "$dL/tests/e2e" "$dL/plugins/ship-when-done" "$dL/plugins/claude-remote-spawn" \
+  "$dL/plugins/proof-of-fix" "$dL/lib"
+cp "$REPO_ROOT/tests/e2e/e2e.py" "$dL/tests/e2e/"
+touch "$dL/plugins/ship-when-done/a"; git -C "$dL" add -A; git -C "$dL" commit -qm harness
+harness_sha=$(git -C "$dL" rev-parse --short HEAD)
+ledger_rev(){ python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import e2e; print(e2e.harness_rev())' "$dL/tests/e2e"; }
+touch "$dL/plugins/claude-remote-spawn/b"; git -C "$dL" add -A; git -C "$dL" commit -qm crs
+touch "$dL/plugins/proof-of-fix/c"; git -C "$dL" add -A; git -C "$dL" commit -qm pof
+assert_eq "$harness_sha" "$(ledger_rev)" "16. a commit to a plugin the lane never runs leaves every proof fresh"
+touch "$dL/lib/_kernel.py"; git -C "$dL" add -A; git -C "$dL" commit -qm kernel
+assert_eq "$(git -C "$dL" rev-parse --short HEAD)" "$(ledger_rev)" "16. a kernel change makes the ledger stale"
+fill_labels(){ python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import e2e
+print(" ".join(sorted(e2e.scenario_label(sc) for sc in e2e.stale_scenarios())))' "$dL/tests/e2e"; }
+all=$(fill_labels)
+for space in 'bare/' 'twist/' 'explicit/' 'multi/'; do
+  assert_contains " $space" " $all" "16. an empty ledger → --fill proves the ${space%/} situations too"
+done
+python3 - "$dL/tests/e2e" <<'PY'
+import json, sys; sys.path.insert(0, sys.argv[1]); import e2e
+cur = e2e.harness_rev()
+labels = sorted(e2e.scenario_label(sc) for sc in e2e.stale_scenarios())
+cov = {l: {"harness": cur} for l in labels}
+cov[labels[-1]]["harness"] = "0000000"
+json.dump(cov, open(e2e.COVERAGE, "w"))
+PY
+last=$(python3 -c 'import sys; print(sorted(sys.argv[1].split())[-1])' "$all")
+assert_eq "$last" "$(fill_labels)" "16. --fill re-proves exactly the stale situation, whatever its space"
+mkdir -p "$ROOT/ghdup"; export GHDUP_LOG="$ROOT/ghdup.log"; : > "$GHDUP_LOG"
+cat > "$ROOT/ghdup/gh" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >> "$GHDUP_LOG"
+[ "$1 $2" = "issue list" ] && echo '[{"number":67,"title":"e2e: persistent failure — twist/wip-branch (seed tag s1)"}]'
+[ "$1 $2" = "issue comment" ] && exit "${GHDUP_COMMENT_RC:-0}"
+exit 0
+EOF
+chmod +x "$ROOT/ghdup/gh"
+file_issue(){ PATH="$ROOT/ghdup:$PATH" python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import e2e
+e2e.file_issue(json.loads(sys.argv[2]), "s9", "boom")' "$dL/tests/e2e" "$1"; }
+file_issue '{"twist": "wip-branch"}'
+assert_contains "issue comment 67" "$(cat "$GHDUP_LOG")" "16. a scenario already failing in an open issue gets a comment there"
+assert_absent "issue create" "$(cat "$GHDUP_LOG")" "16. never a duplicate issue for the same scenario"
+: > "$GHDUP_LOG"; file_issue '{"twist": "preexisting-dirty"}'
+assert_contains "issue create" "$(cat "$GHDUP_LOG")" "16. a new failing scenario still files its own issue"
+: > "$GHDUP_LOG"; GHDUP_COMMENT_RC=1 file_issue '{"twist": "wip-branch"}'
+assert_contains "issue create" "$(cat "$GHDUP_LOG")" "16. a comment that fails still leaves a record (falls back to a new issue)"
+assert_absent "--search" "$(cat "$GHDUP_LOG")" "16. the open-issue lookup lists directly, never through the lagging search index"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]

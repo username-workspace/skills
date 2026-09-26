@@ -22,6 +22,7 @@ REVIEW = os.path.join(SKILLS, "plugins/merge-review/skills/merge-review/scripts/
 WATCH = os.path.join(SKILLS, "plugins/mr-watchdog/skills/mr-watchdog/scripts/watch.py")
 SHIP_HOOK = os.path.join(SKILLS, "plugins/ship-when-done/hooks/stop-hook.py")
 SHIP_PLUGIN = os.path.join(SKILLS, "plugins/ship-when-done")
+HARNESS = ("plugins/ship-when-done", "plugins/merge-review", "plugins/mr-watchdog", "lib")
 E2E_REPO = "username-workspace/harness-e2e"
 ISSUE_REPO = "username-workspace/skills"
 
@@ -161,8 +162,9 @@ COVERAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coverage.js
 
 
 def harness_rev():
-    """The last commit that changed the harness itself — a proof predates it, the proof is stale."""
-    _, rev, _ = sh(["git", "-C", SKILLS, "log", "-1", "--format=%h", "--", "plugins", "lib"])
+    """The last commit that changed the harness this lane exercises — a proof predates it, the proof
+    is stale."""
+    _, rev, _ = sh(["git", "-C", SKILLS, "log", "-1", "--format=%h", "--", *HARNESS])
     return rev
 
 
@@ -187,16 +189,31 @@ def scenario_label(sc):
     return f"explicit/{base}" if sc.get("mode") == "explicit" else base
 
 
+def ledger_spaces():
+    """Every situation the ledger tracks, as runnable scenarios — one inventory for report and fill."""
+    return {
+        "bare": [{"flow": f, "gate": g, "ci": c}
+                 for f in DIMS["flow"] for g in DIMS["gate"] for c in DIMS["ci"]],
+        "projects": [{"flow": "single-shot", "gate": "auto",
+                      "ci": "red-then-fixed" if p == "multi" else "green", "project": p}
+                     for p in PROJECTS],
+        "twists": [{"twist": t} for t in TWISTS],
+        "explicit": list(EXPLICIT_SET),
+    }
+
+
+def stale_scenarios():
+    cov, cur = coverage_read(), harness_rev()
+    return [sc for scs in ledger_spaces().values() for sc in scs
+            if cov.get(scenario_label(sc), {}).get("harness") != cur]
+
+
 def coverage_report():
     cov = coverage_read()
     cur = harness_rev()
-    bare = [f"bare/{f}/{g}/{c}" for f in DIMS["flow"] for g in DIMS["gate"] for c in DIMS["ci"]]
-    twists = [f"twist/{t}" for t in TWISTS]
-    projects = [f"{p}/single-shot/auto/{'red-then-fixed' if p == 'multi' else 'green'}" for p in PROJECTS]
-    explicit = [scenario_label(sc) for sc in EXPLICIT_SET]
     print(f"coverage ledger — {len(cov)} situation(s) proven · harness @ {cur}")
-    for space, keys in (("bare", bare), ("projects", projects), ("twists", twists),
-                        ("explicit", explicit)):
+    for space, scs in ledger_spaces().items():
+        keys = [scenario_label(sc) for sc in scs]
         missing = [k for k in keys if k not in cov]
         stale = [k for k in keys if k in cov and cov[k].get("harness") != cur]
         line = f"  {space}: {len(keys) - len(missing)}/{len(keys)} covered"
@@ -342,9 +359,10 @@ def twist_preexisting_dirty(tag):
     workdir, branch, session, tp = twist_setup(tag, "preexisting-dirty")
     open(os.path.join(workdir, "precious-wip.txt"), "w").write("someone else's uncommitted work\n")
     baselines(workdir, session)
+    _, n0, _ = sh(["git", "-C", workdir, "rev-list", "--count", "HEAD"])
     out = stop(workdir, session, tp)
     _, n, _ = sh(["git", "-C", workdir, "rev-list", "--count", "HEAD"])
-    expect(n == "1", "pre-existing dirty tree: no commit", out)
+    expect(n == n0, "pre-existing dirty tree: no commit", out)
     expect(os.path.isfile(os.path.join(workdir, "precious-wip.txt")), "the dirty file is untouched", out)
     expect(pr_state(branch) is None, "nothing reached the forge", out)
 
@@ -356,9 +374,10 @@ def twist_wip_branch(tag):
     baselines(workdir, session)
     work(workdir, "spike", "green")
     sh([sys.executable, SHIP, "mark-done", "--repo", workdir, "--summary", "spike"], check=True)
+    _, n0, _ = sh(["git", "-C", workdir, "rev-list", "--count", "HEAD"])
     out = stop(workdir, session, tp)
     _, n, _ = sh(["git", "-C", workdir, "rev-list", "--count", "HEAD"])
-    expect(n == "1", "wip/ branch: no commit, no ladder", out)
+    expect(n == n0, "wip/ branch: no commit, no ladder", out)
 
 
 def twist_amend_after_push(tag):
@@ -518,6 +537,17 @@ def file_issue(sc, tag, err):
             f"**Scenario**: `{json.dumps(sc)}`  ·  **tag**: `{tag}`\n"
             f"**Reproduce**: `python3 tests/e2e/e2e.py --scenario {repro}`"
             f"\n\n```\n{str(err)[-4000:]}\n```")
+    prefix = f"e2e: persistent failure — {what} ("
+    _, out, _ = sh(["gh", "issue", "list", "--repo", ISSUE_REPO, "--state", "open", "--limit", "200",
+                    "--json", "number,title"])
+    try:
+        open_issue = next((i["number"] for i in json.loads(out or "[]") if i["title"].startswith(prefix)), None)
+    except Exception:
+        open_issue = None
+    if open_issue:
+        rc, _, _ = sh(["gh", "issue", "comment", str(open_issue), "--repo", ISSUE_REPO, "--body", body])
+        if rc == 0:
+            return
     rc, _, _ = sh(["gh", "issue", "create", "--repo", ISSUE_REPO, "--title", title, "--body", body,
                    "--label", "e2e"])
     if rc != 0:
@@ -538,8 +568,8 @@ def main():
                     help="the EXPLICIT-default set: declaration-driven pipeline, turn-1 inaction")
     ap.add_argument("--coverage", action="store_true", help="print the proven-situations ledger")
     ap.add_argument("--fill", action="store_true",
-                    help="run exactly the bare combos the ledger has never proven for the CURRENT "
-                         "harness (a stale proof is a hole)")
+                    help="run exactly the situations (every space) the ledger has never proven for the "
+                         "CURRENT harness (a stale proof is a hole)")
     args = ap.parse_args()
     globals()["E2E_REPO"] = args.repo
 
@@ -557,19 +587,13 @@ def main():
             scenarios = [{"flow": parts[0], "gate": parts[1], "ci": parts[2],
                           **({"project": parts[3]} if len(parts) > 3 else {}), **mode}]
     elif args.fill:
-        cov = coverage_read()
-        cur = harness_rev()
-        scenarios = [{"flow": f, "gate": g, "ci": c}
-                     for f in DIMS["flow"] for g in DIMS["gate"] for c in DIMS["ci"]
-                     if cov.get(f"bare/{f}/{g}/{c}", {}).get("harness") != cur]
+        scenarios = stale_scenarios()
     elif args.twists:
-        scenarios = [{"twist": t} for t in TWISTS]
+        scenarios = ledger_spaces()["twists"]
     elif args.explicit:
-        scenarios = list(EXPLICIT_SET)
+        scenarios = ledger_spaces()["explicit"]
     elif args.projects:
-        scenarios = [{"flow": "single-shot", "gate": "auto",
-                      "ci": "red-then-fixed" if p == "multi" else "green", "project": p}
-                     for p in PROJECTS]
+        scenarios = ledger_spaces()["projects"]
     else:
         scenarios = generate(args.seed, args.count)
 
