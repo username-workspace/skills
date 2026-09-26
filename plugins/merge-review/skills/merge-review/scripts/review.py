@@ -249,6 +249,25 @@ def cmd_gate(args):
 
 # --- forge-agnostic context for a local review -----------------------------------------------------
 
+GITHUB_THREADS_QUERY = ("query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name)"
+                        "{pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved "
+                        "comments(first:20){nodes{author{login} body path}}}}}}}")
+
+
+def github_open_threads(repo, number):
+    """Unresolved inline review threads — `gh pr view` has no field for them (GitLab's discussions do)."""
+    rc, out, _ = run(["gh", "api", "graphql", "-F", "owner={owner}", "-F", "name={repo}",
+                      "-F", f"number={number}", "-f", f"query={GITHUB_THREADS_QUERY}"], repo)
+    if rc != 0:
+        return []
+    try:
+        threads = json.loads(out)["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+    except Exception:
+        return []
+    return [f"[{(c.get('author') or {}).get('login', '?')} @ {c.get('path', '')}] {c.get('body', '')}"
+            for t in threads if not t.get("isResolved") for c in (t.get("comments") or {}).get("nodes", [])]
+
+
 def fetch_mr_context(repo, forge, branch):
     ctx = {"number": None, "title": None, "description": None, "unresolved": []}
     if not branch:
@@ -265,6 +284,8 @@ def fetch_mr_context(repo, forge, branch):
                     b = (r.get("body") or "").strip()
                     if b:
                         notes.append(f"[{(r.get('author') or {}).get('login', '?')}/{r.get('state', '')}] {b}")
+                if ctx["number"]:
+                    notes += github_open_threads(repo, ctx["number"])
                 ctx["unresolved"] = [n for n in notes if n.strip()][:50]
             except Exception:
                 pass
@@ -279,7 +300,7 @@ def fetch_mr_context(repo, forge, branch):
         except Exception:
             pass
         if iid:
-            rc, out, _ = run(["glab", "api", f"projects/:id/merge_requests/{iid}/discussions"], repo)
+            rc, out, _ = run(["glab", "api", "--paginate", f"projects/:id/merge_requests/{iid}/discussions"], repo)
             try:
                 notes = []
                 for disc in json.loads(out):

@@ -28,13 +28,42 @@ case "$1 $2" in
   *) exit 0;;
 esac
 EOF
+# glab speaks the real GitLab REST shapes: pipelines come from $STUB_GL_PIPELINES (a JSON list; when
+# absent, one pipeline for HEAD on the current branch in the $STUB_CI state), filtered by the query's
+# sha/ref and ordered newest first like the API; failed jobs from $STUB_GL_JOBS; traces per job id.
+# `ci status` prints glab 1.90's human format; `ci trace` is the interactive job picker — never usable.
 cat > "$ROOT/bin/glab" <<'EOF'
 #!/usr/bin/env bash
 ci="${STUB_CI:-pending}"
 case "$1 $2" in
-  "mr list")   echo "[{\"state\":\"${STUB_MR_STATE_GL:-opened}\"}]";;
-  "ci status") if [ "$ci" = none ]; then echo "no pipeline found"; exit 1; else echo "status: $ci"; fi;;
-  "ci trace")  echo "JOB FAILED: AssertionError";;
+  "mr list")   echo "[{\"iid\":4,\"state\":\"${STUB_MR_STATE_GL:-opened}\"}]";;
+  "ci status") if [ "$ci" = none ]; then echo "No pipeline found for branch x"; exit 1; fi
+               printf 'https://gitlab.com/t/r/-/pipelines/1\nSHA: x\nPipeline state: %s\n' "$ci";;
+  "ci trace")  echo "INTERACTIVE-PICKER"; exit 1;;
+  api*) echo "$2" >> "${GL_API_LOG:-/dev/null}"
+     case "$2" in
+       *"/pipelines?"*) python3 - "$2" "$ci" <<'PY'
+import json, os, subprocess, sys
+from urllib.parse import parse_qs, urlsplit
+q = {k: v[0] for k, v in parse_qs(urlsplit(sys.argv[1]).query).items()}
+fx = os.environ.get("STUB_GL_PIPELINES")
+if fx:
+    arr = json.load(open(fx))
+else:
+    head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    br = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True).stdout.strip()
+    st = {"success": "success", "failed": "failed", "pending": "running"}.get(sys.argv[2])
+    arr = [{"id": 1, "sha": head, "ref": br, "status": st}] if st else []
+arr = [p for p in arr if all(p.get(k) == q[k] for k in ("sha", "ref") if k in q)]
+arr.sort(key=lambda p: -p["id"])
+print(json.dumps(arr[: int(q.get("per_page", 20))]))
+PY
+       ;;
+       *"/jobs?"*)  if [ -n "${STUB_GL_JOBS:-}" ]; then cat "$STUB_GL_JOBS"
+                    else echo '[{"id":7,"name":"test","status":"failed","allow_failure":false}]'; fi;;
+       */jobs/*/trace) echo "JOB ${2//[^0-9]/} FAILED: AssertionError at app.py:7";;
+       *) echo '[]';;
+     esac;;
   *) exit 0;;
 esac
 EOF
@@ -86,7 +115,49 @@ for forge in ("github","gitlab"):
 ck(watch.mr_open(R,"github","feat") is True, "mr_open github OPEN")
 os.environ["STUB_MR_STATE"]="MERGED"; ck(watch.mr_open(R,"github","feat") is False, "mr_open github not-open")
 PY
-while IFS= read -r l; do case "$l" in PASS*) ok "${l#PASS }";; FAIL*) ko "${l#FAIL }";; esac; done < <(python3 "$ROOT/t2.py" "$SCRIPTS" "$ROOT")
+new_repo "$ROOT/t2repo" gitlab.com
+while IFS= read -r l; do case "$l" in PASS*) ok "${l#PASS }";; FAIL*) ko "${l#FAIL }";; esac; done < <(python3 "$ROOT/t2.py" "$SCRIPTS" "$ROOT/t2repo")
+
+# 2g. GitLab: the verdict is the exact commit's pipelines on THIS branch (or its MR refs), latest per
+# ref — never another ref sharing the sha (policy, workload pipelines), never a human-format parse;
+# the failing log comes from the failed jobs' traces, never the interactive `glab ci trace` picker.
+new_repo "$ROOT/gl" gitlab.com
+echo w > "$ROOT/gl/w.txt"; git -C "$ROOT/gl" add -A; git -C "$ROOT/gl" commit -qm w
+cat > "$ROOT/t2g.py" <<'PY'
+import json, os, sys; sys.path.insert(0, sys.argv[1]); R=sys.argv[2]; import watch, subprocess
+def ck(c,m): print(("PASS " if c else "FAIL ")+"2g. "+m)
+sha = subprocess.run(["git","-C",R,"rev-parse","HEAD"],capture_output=True,text=True).stdout.strip()
+fx = os.path.join(os.path.dirname(R), "pipelines.json"); os.environ["STUB_GL_PIPELINES"] = fx
+def at(pipes):
+    json.dump([dict(p, sha=p.get("sha", sha)) for p in pipes], open(fx, "w"))
+    return watch.ci_status_at(R, "gitlab", sha, "feat")
+ck(at([{"id":9,"ref":"refs/workloads/abc","status":"success"},{"id":5,"ref":"feat","status":"failed"}])=="failed",
+   "a newer pipeline of another ref on the same sha is not this branch's verdict")
+ck(at([{"id":5,"ref":"feat","status":"failed"},{"id":6,"ref":"feat","status":"success"}])=="success",
+   "a re-run pipeline supersedes the failed one (latest per ref)")
+ck(at([{"id":2,"ref":"feat","status":"success"},{"id":3,"ref":"refs/merge-requests/4/head","status":"running"}])=="pending",
+   "the MR pipeline still running keeps the verdict pending")
+ck(at([{"id":2,"ref":"feat","status":"skipped"}])=="success", "skipped pipeline is final, not pending forever")
+ck(at([{"id":2,"ref":"feat","status":"manual"}])=="success", "manual (blocked) pipeline is final, not pending forever")
+ck(at([{"id":2,"ref":"feat","status":"success","sha":"0"*40}])=="none", "a pipeline for another sha is no verdict")
+ck(at([])=="none", "no pipeline yet → none (keep polling)")
+json.dump([{"id":8,"ref":"feat","status":"success","sha":sha}], open(fx,"w"))
+os.environ["STUB_CI"]="failed"
+ck(watch.ci_status(R, "gitlab", "feat")=="success",
+   "branch status reads the pipeline state, not job lines (allowed-to-fail jobs don't turn it red)")
+json.dump([{"id":8,"ref":"feat","status":"failed","sha":sha}], open(fx,"w"))
+jobs = os.path.join(os.path.dirname(R), "jobs.json"); os.environ["STUB_GL_JOBS"] = jobs
+json.dump([{"id":7,"name":"test","status":"failed","allow_failure":False},
+           {"id":31,"name":"lint","status":"failed","allow_failure":True}], open(jobs,"w"))
+log = watch.failing_log(R, "gitlab", "feat", sha)
+ck("JOB 7 FAILED" in log, "failing log = the failed job's trace")
+ck("JOB 31" not in log, "an allowed-to-fail job is not the failure")
+ck("INTERACTIVE-PICKER" not in log, "never the interactive glab ci trace")
+ck("JOB 7 FAILED" in watch.failing_log(R, "gitlab", "feat"), "branch-level failing log resolves the latest pipeline")
+PY
+out=$(python3 "$ROOT/t2g.py" "$SCRIPTS" "$ROOT/gl" 2>&1); rc=$?
+while IFS= read -r l; do case "$l" in PASS*) ok "${l#PASS }";; FAIL*) ko "${l#FAIL }";; esac; done <<< "$out"
+assert_eq 0 "$rc" "2g. the GitLab verdict probe ran to the end — ${out##*$'\n'}"
 
 # 3. guard refusals
 d="$ROOT/g_main"; new_repo "$d" github.com main

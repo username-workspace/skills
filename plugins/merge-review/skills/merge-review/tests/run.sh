@@ -31,6 +31,36 @@ case "$ctx" in *'git diff main...HEAD'*) ok "context: diff_cmd against base";; *
 case "$ctx" in *'"threshold": 80'*) ok "context: default threshold 80";; *) ko "context threshold";; esac
 case "$ctx" in *'feat: work'*) ok "context: commits listed";; *) ko "context commits";; esac
 
+# --- 1c. forge context: what reviewers left open reaches the review — every page, inline threads too
+mkdir -p "$ROOT/forgebin"
+cat > "$ROOT/forgebin/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "pr view") echo '{"number":5,"title":"T","body":"B","comments":[],"reviews":[]}';;
+  "api graphql") echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
+    {"isResolved":true,"comments":{"nodes":[{"author":{"login":"rev"},"body":"RESOLVED-THREAD","path":"a.py"}]}},
+    {"isResolved":false,"comments":{"nodes":[{"author":{"login":"rev"},"body":"OPEN-THREAD","path":"app.txt"}]}}]}}}}}';;
+esac
+EOF
+cat > "$ROOT/forgebin/glab" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "mr list") echo '[{"iid":4,"title":"T","description":"D"}]';;
+  api*) case " $* " in
+          *" --paginate "*) echo '[{"notes":[{"body":"PAGE-1-NOTE","author":{"username":"a"}}]},{"notes":[{"body":"PAGE-2-NOTE","author":{"username":"b"}}]}]';;
+          *) echo '[{"notes":[{"body":"PAGE-1-NOTE","author":{"username":"a"}}]}]';;
+        esac;;
+esac
+EOF
+chmod +x "$ROOT/forgebin/gh" "$ROOT/forgebin/glab"
+dh="$ROOT/ctxgh"; mkrepo "$dh"; git -C "$dh" checkout -q -b feat; work "$dh"; git -C "$dh" remote set-url origin https://github.com/t/r.git
+ctx=$(env PATH="$ROOT/forgebin:$ROOT/realbin" "$PY" "$RV" context --repo "$dh")
+assert_contains "OPEN-THREAD" "$ctx" "context github: an unresolved inline review thread reaches the review"
+assert_absent "RESOLVED-THREAD" "$ctx" "context github: resolved threads stay out"
+dl="$ROOT/ctxgl"; mkrepo "$dl"; git -C "$dl" checkout -q -b feat; work "$dl"; git -C "$dl" remote set-url origin https://gitlab.com/t/r.git
+ctx=$(env PATH="$ROOT/forgebin:$ROOT/realbin" "$PY" "$RV" context --repo "$dl")
+assert_contains "PAGE-2-NOTE" "$ctx" "context gitlab: discussions beyond the first page reach the review"
+
 # --- 1b. context --packet: self-contained payload for a fresh-context subagent review ------------
 out=$(env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$d" --packet)
 echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["diff"] and d["commits"] and "threshold" in d and "rubric" in d and d["truncated"] is False' \

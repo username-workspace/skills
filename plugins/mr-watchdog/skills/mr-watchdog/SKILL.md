@@ -114,7 +114,11 @@ status and logs. The fix runs in your interactive session.
 
 - It opens no MR and merges nothing — it's the CI-watch step after **ship-when-done** (which pushes and
   opens the MR once **merge-review** has passed) for the full open → review → green → (you merge) chain.
-- Reading CI status relies on the forge CLI's output; if the CLI can't see a pipeline it reports `none`
-  and the watcher idles rather than guessing.
+- The verdict belongs to the exact commit being watched, read from structured forge data — never a
+  CLI's human output: on GitHub the commit's latest check runs; on GitLab the pipelines of that sha on
+  the branch or its MR refs, newest per ref (`failed`/`canceled` red; `success`/`skipped`/`manual`
+  final). Pipelines of other refs sharing the sha (security policy, workloads) are not its verdict. On
+  red, the log is the failed jobs' traces (allowed-to-fail jobs excluded). Nothing registered yet for
+  the sha → `none`, and the watcher keeps polling rather than guessing.
 - Delivery rides the harness: the watcher is a background task **your session launched**, so its verdict
   re-invokes that session when it resolves. The only remote dependency in the whole chain lives here.

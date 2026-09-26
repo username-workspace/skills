@@ -53,6 +53,7 @@ cat > "$ROOT/glabbin/glab" <<EOF
 #!/usr/bin/env bash
 echo "\$@" >> "$GLAB_LOG"
 [ "\$1 \$2" = "mr create" ] && { echo "https://gitlab.test/mr/1"; exit 0; }
+[ "\$1 \$2" = "mr list" ] && { [ -n "\${GLAB_MR_LIST_RC:-}" ] && exit "\$GLAB_MR_LIST_RC"; echo "\${GLAB_MR_LIST:-[]}"; exit 0; }
 exit 0
 EOF
 chmod +x "$ROOT/glabbin/glab"
@@ -380,6 +381,18 @@ assert_contains 'mr create' "$(cat "$GLAB_LOG")" "25. glab mr create invoked"
 assert_contains '--draft' "$(cat "$GLAB_LOG")" "25. MR opened as draft"
 assert_contains '--target-branch main' "$(cat "$GLAB_LOG")" "25. target branch passed to glab"
 
+# 25b. gitlab: an MR already open for the branch → no second create (the gh path's guard, test 23)
+d="$ROOT/t25b"; new_repo "$d" --remote gitlab.com; git -C "$d" checkout -q -b feat
+echo x > "$d/a.txt"; : > "$GLAB_LOG"
+out=$(GLAB_MR_LIST='[{"iid":3,"state":"opened"}]' forge_ladder "$d" "$ROOT/glabbin:$ROOT/realbin")
+assert_contains 'pr:exists' "$out" "25b. open MR on the branch → pr:exists"
+assert_absent 'mr create' "$(cat "$GLAB_LOG")" "25b. no duplicate glab mr create"
+d="$ROOT/t25c"; new_repo "$d" --remote gitlab.com; git -C "$d" checkout -q -b feat
+echo x > "$d/a.txt"; : > "$GLAB_LOG"
+out=$(GLAB_MR_LIST_RC=1 forge_ladder "$d" "$ROOT/glabbin:$ROOT/realbin")
+assert_contains 'pr:check-failed' "$out" "25b. glab mr list failing → check-failed, never a blind create"
+assert_absent 'mr create' "$(cat "$GLAB_LOG")" "25b. no create when the lookup failed"
+
 # 26. gitlab WITHOUT glab → MR requested through git push options (no CLI)  [forge case 2]
 d="$ROOT/t26"; new_repo "$d" --remote gitlab.com; git -C "$d" checkout -q -b feat
 echo x > "$d/a.txt"
@@ -387,6 +400,11 @@ out=$(forge_ladder "$d" "$ROOT/realbin")
 assert_contains 'push' "$out" "26. pushed the branch"
 assert_contains 'pr:gitlab-mr' "$out" "26. MR requested via push options (no CLI)"
 git -C "$d.git" rev-parse --verify -q feat >/dev/null && ok "26. branch landed on the remote" || ko "26. branch on remote"
+d="$ROOT/t26b"; new_repo "$d" --remote gitlab.com; git -C "$d" checkout -q -b feat
+printf '#!/bin/sh\necho "View merge request for feat:" >&2\necho "  https://gitlab.com/g/p/-/merge_requests/12" >&2\n' > "$d.git/hooks/pre-receive"
+chmod +x "$d.git/hooks/pre-receive"; echo x > "$d/a.txt"
+out=$(forge_ladder "$d" "$ROOT/realbin")
+assert_contains 'https://gitlab.com/g/p/-/merge_requests/12' "$out" "26. the MR URL GitLab prints on push is surfaced"
 
 # 27. bitbucket (no CLI path) → PR-creation URL surfaced  [forge case 3]
 d="$ROOT/t27"; new_repo "$d" --remote bitbucket.org; git -C "$d" checkout -q -b feat
@@ -414,6 +432,10 @@ check(pt and pt["host"] == "gitlab.example.com:8080" and pt["path"] == "g/r", "h
 u = ship.parse_remote("file:///srv/git/x.git")
 check(u is None or u["forge"] == "unknown", "non-forge URL stays safe")
 check(ship.parse_remote("garbage") is None, "garbage rejected")
+import subprocess, tempfile, _kernel
+r = tempfile.mkdtemp(); subprocess.run(["git", "init", "-q", r])
+subprocess.run(["git", "-C", r, "remote", "add", "origin", "https://gitlab.com/acme/github-importer.git"])
+check(_kernel.detect_forge(r, {}, "origin") == "gitlab", "the forge is the host's, not a word in the project path")
 check(ship.parse_remote("../local/bare") is None, "bare local path rejected")
 gl = ship.parse_remote("https://gitlab.com/g/r.git")
 check("/-/merge_requests/new?" in ship.pr_create_url(gl, "main", "f/x"), "gitlab MR URL shape")
