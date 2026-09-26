@@ -440,4 +440,19 @@ for forge in github gitlab; do
   done
 done
 
+# --- 17. a linked worktree works under the repo's trusted config, not a config of its own ------------
+dW="$ROOT/wtrepo"; new_repo "$dW"
+printf '{"gate":"echo ran >> %s"}' "$ROOT/gate17.log" > "$dW/.git/ship-when-done.json"; : > "$ROOT/gate17.log"
+printf '{"threshold":95}' > "$dW/.git/merge-review.json"
+git -C "$dW" worktree add -q -b feat .claude/worktrees/w; w="$dW/.claude/worktrees/w"
+python3 "$SHIP" baseline --repo "$w" --session s17 >/dev/null
+echo work > "$w/a.txt"
+python3 "$SHIP" engage --repo "$w" --session s17 >/dev/null 2>&1
+assert_eq 1 "$(wc -l < "$ROOT/gate17.log" | tr -d ' ')" "17. a delivery from a worktree runs the repo's gate"
+review_threshold(){ python3 "$REVIEW" context --repo "$1" | python3 -c 'import json,sys; print(json.load(sys.stdin)["threshold"])'; }
+assert_eq 95 "$(review_threshold "$w")" "17. the repo's review threshold holds in its worktree"
+printf '{"threshold":70}' > "$(git -C "$w" rev-parse --git-dir)/merge-review.json"
+assert_eq 70 "$(review_threshold "$w")" "17. a worktree's own git dir may still override the repo's config"
+assert_eq 95 "$(review_threshold "$dW")" "17. that override stays in its worktree"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]

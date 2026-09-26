@@ -26,10 +26,21 @@ def run(cmd, cwd, check=False, raw=False, timeout=None):
     return (p.returncode, p.stdout if raw else p.stdout.strip(), p.stderr.strip())
 
 
-def git_dir(repo):
-    rc, gd, _ = run(["git", "rev-parse", "--git-dir"], repo)
+def _rev_parse_dir(repo, flag):
+    rc, gd, _ = run(["git", "rev-parse", flag], repo)
     gd = gd if (rc == 0 and gd) else ".git"
     return gd if os.path.isabs(gd) else os.path.join(repo, gd)
+
+
+def git_dir(repo):
+    return _rev_parse_dir(repo, "--git-dir")
+
+
+def trusted_config_paths(repo, name):
+    """A repo's trusted config sits in the .git/ its linked worktrees share; a worktree's own git dir
+    may override it."""
+    dirs = (os.path.realpath(_rev_parse_dir(repo, f)) for f in ("--git-common-dir", "--git-dir"))
+    return [os.path.join(d, name) for d in dict.fromkeys(dirs)]
 
 
 def cur_branch(repo):
