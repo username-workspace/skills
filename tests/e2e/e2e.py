@@ -10,7 +10,8 @@ Watcher duties: every scenario failure is re-run once with the same seed (flake 
 is self-healed before each run (stale e2e/* branches and PRs are garbage-collected); a persistent
 failure files a GitHub issue on the skills repo carrying the full evidence, ready for a fixing session.
 
-Usage: python3 tests/e2e/e2e.py [--seed N] [--count N] [--repo owner/name] [--scenario flow:gate:ci]
+Usage: python3 tests/e2e/e2e.py [--forge github|gitlab] [--seed N] [--count N] [--repo owner/name]
+                               [--scenario flow:gate:ci]
 """
 import argparse, json, os, random, shutil, subprocess, sys, tempfile, time
 from urllib.parse import quote
@@ -97,8 +98,6 @@ def expect(cond, what, evidence=""):
         raise Failure(f"{what}\n--- evidence ---\n{evidence[-3000:]}")
 
 
-# --- self-heal: the sandbox must be clean before and after, whatever previous runs did --------------
-
 # --- the sandbox forge: one small surface, GitHub via gh, GitLab via its REST API through glab -------
 
 def gl_project():
@@ -108,13 +107,14 @@ def gl_project():
 def open_prs():
     """Open PRs/MRs as [{number, branch, draft}]."""
     if FORGE == "gitlab":
-        rc, out, _ = sh(["glab", "api", f"{gl_project()}/merge_requests?state=opened&per_page=100"])
+        _, out, _ = sh(["glab", "api", f"{gl_project()}/merge_requests?state=opened&per_page=100"],
+                       check=True)
         return [{"number": m["iid"], "branch": m["source_branch"], "draft": bool(m.get("draft"))}
-                for m in (json.loads(out) if rc == 0 and out else [])]
-    rc, out, _ = sh(["gh", "pr", "list", "--repo", E2E_REPO, "--state", "open",
-                     "--json", "number,headRefName,isDraft"])
+                for m in json.loads(out or "[]")]
+    _, out, _ = sh(["gh", "pr", "list", "--repo", E2E_REPO, "--state", "open",
+                    "--json", "number,headRefName,isDraft"], check=True)
     return [{"number": p["number"], "branch": p["headRefName"], "draft": p["isDraft"]}
-            for p in (json.loads(out) if rc == 0 and out else [])]
+            for p in json.loads(out or "[]")]
 
 
 def branch_delete(branch):
@@ -137,10 +137,10 @@ def pr_close(pr, branch=None, check=False):
 
 def branches():
     if FORGE == "gitlab":
-        rc, out, _ = sh(["glab", "api", f"{gl_project()}/repository/branches?per_page=100"])
-        return [b["name"] for b in (json.loads(out) if rc == 0 and out else [])]
-    rc, out, _ = sh(["gh", "api", f"repos/{E2E_REPO}/branches", "--jq", ".[].name"])
-    return out.splitlines() if rc == 0 else []
+        _, out, _ = sh(["glab", "api", f"{gl_project()}/repository/branches?per_page=100"], check=True)
+        return [b["name"] for b in json.loads(out or "[]")]
+    _, out, _ = sh(["gh", "api", f"repos/{E2E_REPO}/branches", "--jq", ".[].name"], check=True)
+    return out.splitlines()
 
 
 def gc_sandbox():
@@ -259,7 +259,8 @@ def stale_scenarios():
 def coverage_report():
     cov = coverage_read()
     cur = harness_rev()
-    print(f"coverage ledger ({FORGE}) — {len(cov)} situation(s) proven · harness @ {cur}")
+    proven = sum(scenario_label(sc) in cov for scs in ledger_spaces().values() for sc in scs)
+    print(f"coverage ledger ({FORGE}) — {proven} situation(s) proven · harness @ {cur}")
     for space, scs in ledger_spaces().items():
         keys = [scenario_label(sc) for sc in scs]
         missing = [k for k in keys if k not in cov]
@@ -581,7 +582,7 @@ def file_issue(sc, tag, err):
              + f"{sc['flow']}:{sc['gate']}:{sc['ci']}" + (f":{sc['project']}" if sc.get("project") else ""))
     body = (f"The E2E lane failed twice on the same generated scenario.\n\n"
             f"**Scenario**: `{json.dumps(sc)}`  ·  **tag**: `{tag}`\n"
-            f"**Reproduce**: `python3 tests/e2e/e2e.py --scenario {repro}`"
+            f"**Reproduce**: `python3 tests/e2e/e2e.py --forge {FORGE} --scenario {repro}`"
             f"\n\n```\n{str(err)[-4000:]}\n```")
     prefix = f"e2e: persistent failure — {what} ("
     _, out, _ = sh(["gh", "issue", "list", "--repo", ISSUE_REPO, "--state", "open", "--limit", "200",
