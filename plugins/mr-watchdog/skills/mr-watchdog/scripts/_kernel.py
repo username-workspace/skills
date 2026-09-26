@@ -204,13 +204,17 @@ def auto_engage(repo):
     the done-marker, ship's handoff stamp. HARNESS_AUTO_ENGAGE=1 restores inferred engagement
     (baseline deltas, provenance ∩ branch content, upstream advance), scoped: a session launched
     outside a git work tree (CLAUDE_PROJECT_DIR, e.g. $HOME) has no project to infer from, and a
-    launch dir or repo under a path of HARNESS_AUTO_ENGAGE_EXCLUDE (os.pathsep-separated — repos that
-    carry their own delivery harness) stays explicit. Truthy allowlist: the truthy side takes
+    launch dir or repo under a path of HARNESS_AUTO_ENGAGE_EXCLUDE (os.pathsep-separated, ~ and $VAR
+    expanded — repos that carry their own delivery harness) stays explicit; an entry that still is not
+    an absolute path cannot be honoured, so auto stays off. Truthy allowlist: the truthy side takes
     autonomous actions, so an unrecognized value must mean OFF."""
     if os.environ.get("HARNESS_AUTO_ENGAGE", "").lower() not in ("1", "true"):
         return False
-    excluded = [os.path.realpath(os.path.expanduser(p))
-                for p in os.environ.get("HARNESS_AUTO_ENGAGE_EXCLUDE", "").split(os.pathsep) if p.strip()]
+    entries = [os.path.expandvars(os.path.expanduser(p.strip()))
+               for p in os.environ.get("HARNESS_AUTO_ENGAGE_EXCLUDE", "").split(os.pathsep) if p.strip()]
+    if not all(os.path.isabs(e) for e in entries):
+        return False
+    excluded = [os.path.realpath(e) for e in entries]
     launch = os.environ.get("CLAUDE_PROJECT_DIR")
     if launch and (not git_toplevel(launch) or _under(launch, excluded)):
         return False

@@ -331,6 +331,10 @@ assert_eq "no" "$(engaged_in "$dS/.." "")" "14b. launch dir that is not a work t
 dX="$ROOT/scope-x"; new_repo "$dX"
 assert_eq "no" "$(engaged_in "$dX" "$dX")" "14b. session launched in an excluded repo → explicit for every repo it touches"
 assert_eq "yes" "$(engaged_in "$dS" "/nonexistent:$ROOT/scope-x")" "14b. exclusions elsewhere leave a side project AUTO"
+assert_eq "no" "$(engaged_in "$dS" "/nonexistent: $ROOT/scope ")" "14b. a padded exclusion entry still excludes"
+assert_eq "no" "$(env HARNESS_E2E_ROOT="$ROOT" CLAUDE_PROJECT_DIR="$dS" HARNESS_AUTO_ENGAGE_EXCLUDE='$HARNESS_E2E_ROOT/scope' python3 "$REVIEW" engaged --repo "$dS" --session s-sc)" \
+  "14b. an exclusion written with \$VAR (a JSON settings value is not shell-expanded) still excludes"
+assert_eq "no" "$(engaged_in "$dS" "relative/tree")" "14b. an entry that cannot resolve to an absolute path fails closed"
 python3 "$SHIP" mark-done --repo "$dS" --summary w >/dev/null
 assert_eq "yes" "$(engaged_in "$ROOT/scope/home" "")" "14b. an explicit declaration still engages outside the AUTO scope"
 

@@ -166,7 +166,7 @@ probe → fix → gate → mark-done → review → push → PR → watch → me
 
 "Engagement" answers one question: *should this plugin act on the current branch right now?* There are
 two modes, switched by the `HARNESS_AUTO_ENGAGE` environment variable (read at call time, in
-`_kernel.auto_engage()`).
+`_kernel.auto_engage(repo)`, scoped as below).
 
 ### Explicit — the default
 
