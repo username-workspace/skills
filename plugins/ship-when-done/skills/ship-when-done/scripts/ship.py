@@ -784,20 +784,30 @@ def stamp_sibling(repo, fname, branch, session, entry):
 def handoff(repo, fname, branch, session):
     """Hand engagement to a sibling (merge-review, mr-watchdog) for work THIS session produced, through
     the sibling's own `handoff` CLI, found at the script path its baseline stamped. Absent: inert."""
+    presence = read_state(os.path.join(git_dir(repo), fname))
+    script = presence.get("script") if isinstance(presence, dict) else None
+    if not script or not os.path.isfile(script):
+        return
     try:
-        script = read_state(os.path.join(git_dir(repo), fname)).get("script")
-        if not script or not os.path.isfile(script):
-            return
         r = subprocess.run([sys.executable, script, "handoff", "--repo", repo, "--session", session,
                             "--branch", branch], capture_output=True, text=True, timeout=20)
-    except Exception:
+        refusal = {"branch": branch, "rc": r.returncode, "stderr": r.stderr[-300:]} if r.returncode else None
+    except Exception as e:
+        refusal = {"branch": branch, "error": str(e)[-300:]}
+    path = os.path.join(git_dir(repo), "swd-handoff.json")
+    evidence = read_state(path)
+    evidence = evidence if isinstance(evidence, dict) else {}
+    if refusal:
+        evidence[fname] = refusal
+    elif evidence.pop(fname, None) is None:
         return
-    evidence = os.path.join(git_dir(repo), "swd-handoff.json")
-    if r.returncode != 0:
-        _kernel.write_state(evidence, {"sibling": fname, "branch": branch, "rc": r.returncode,
-                                       "stderr": r.stderr[-300:]})
-    elif os.path.exists(evidence):
-        os.remove(evidence)
+    if evidence:
+        _kernel.write_state(path, evidence)
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def watchdog_handoff(repo, session):
@@ -1058,7 +1068,7 @@ def cmd_stage(args):
         print(json.dumps(stage_report(args.stage, "blocked", {"enabled": False})))
         return
     me = ["python3", os.path.abspath(__file__)]
-    n = ["--need", args.need, "--repo", repo] + (["--config", args.config] if args.config else [])
+    n = ["--need", args.need, "--repo", repo] + (["--config", os.path.abspath(args.config)] if args.config else [])
     state = git_state(repo)
     if not state.get("is_git"):
         print(json.dumps(stage_report(args.stage, "blocked", {"refused": "not-a-git-repo"})))

@@ -810,6 +810,22 @@ python3 -c 'import sys, importlib.util as u
 sp = u.spec_from_file_location("ship", sys.argv[1]); m = u.module_from_spec(sp); sp.loader.exec_module(m)
 m.handoff(sys.argv[2], "mr-watchdog-session.json", "need/n1", "s1")' "$SHIP" "$d"
 [ -f "$d/.git/swd-handoff.json" ] && ko "N. a later successful handoff clears the stale evidence" || ok "N. a later successful handoff clears the stale evidence"
+printf 'import sys\nsys.exit(2)\n' > "$ROOT/oldreview.py"
+printf '{"v":1,"sessions":{},"script":"%s","prepush_gate":true}' "$ROOT/oldreview.py" > "$d/.git/merge-review-session.json"
+python3 -c 'import sys, importlib.util as u
+sp = u.spec_from_file_location("ship", sys.argv[1]); m = u.module_from_spec(sp); sp.loader.exec_module(m)
+m.handoff(sys.argv[2], "merge-review-session.json", "need/n1", "s1")
+m.handoff(sys.argv[2], "mr-watchdog-session.json", "need/n1", "s1")' "$SHIP" "$d"
+assert_contains 'merge-review-session.json' "$(cat "$d/.git/swd-handoff.json" 2>/dev/null)" \
+  "N. one sibling's refusal survives the other sibling's successful handoff"
+printf '["not", "a", "marker"]' > "$d/.git/swd-done.json"; mv "$d/.git/swd-pr.json" "$ROOT/swd-pr.keep"
+assert_contains '"stage": "shipping"' "$(python3 "$SHIP" stage --repo "$d" --need N1 --stage shipping 2>&1)" \
+  "N. a malformed declaration never crashes a stage"
+rm -f "$d/.git/swd-done.json"; mv "$ROOT/swd-pr.keep" "$d/.git/swd-pr.json"
+cp "$ROOT/swd-alt.json" "$d/swd-rel.json"
+step=$(cd "$d" && python3 "$SHIP" stage --repo . --need N1 --stage gating --config swd-rel.json)
+assert_contains "\"$(cd "$d" && pwd -P)/swd-rel.json\"" "$step" "N. a relative --config is carried into the steps as an absolute path"
+rm -f "$d/swd-rel.json"
 python3 "$SHIP" stage --repo "$d" --stage gating >/dev/null 2>&1; rc=$?
 assert_eq 2 "$rc" "N. stage without the need is refused: its steps would carry no need token"
 printf '{"gate":"true"}' > "$ROOT/swd-alt.json"; rm -f "$d/.git/ship-when-done.json"

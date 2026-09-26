@@ -310,7 +310,7 @@ def marker_for_branch(repo, branch):
     a wildcard engagement); only evaluate_completion keeps the tolerant read, on an already-engaged
     branch. Inert when the sibling is absent."""
     m = read_marker(repo)
-    return bool(m and m.get("branch") == branch)
+    return isinstance(m, dict) and m.get("branch") == branch
 
 
 def stage_report(stage, state, evidence=None, kind="none", **step):

@@ -523,7 +523,7 @@ def cmd_stage(args):
     evidence = {"sha": head, "verdict": verdict, "reason": v.get("reason") if verdict else None,
                 "file": verdict_path(repo)}
     rerun = ["python3", os.path.abspath(__file__), "run", "--need", args.need, "--repo", repo] + \
-        (["--config", args.config] if args.config else [])
+        (["--config", os.path.abspath(args.config)] if args.config else [])
     if verdict == "stopped" and not (v.get("reason") or "").startswith(("timeout", "branch or HEAD moved")):
         print(json.dumps(stage_report("ci", "blocked", evidence, "skill", skill="mr-watchdog", instruction=(
             f"The CI watcher stopped at {head[:12]}: {v.get('reason')}. Find out why (is the PR/MR open, is the "

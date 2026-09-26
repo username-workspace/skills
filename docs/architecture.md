@@ -115,6 +115,7 @@ plugin degrades to inert rather than crash.
 | `swd-claims.json` | ship-when-done | paths a live background writer has claimed (kept out of commits) |
 | `swd-done.json` | ship-when-done | the `mark-done` delivery declaration (the explicit-mode signal) |
 | `swd-gate.json` | ship-when-done | the last gate run's verdict + output tail + duration (observability) |
+| `swd-handoff.json` | ship-when-done | per sibling, the last `handoff` it refused (a version too old), cleared by its next success |
 | `swd-pr.json` | ship-when-done | the PR/MR a need's `open-pr` opened, per branch, and whether it was marked ready |
 | `swd-review-block.json`, `swd-url.json` | ship-when-done | once-per-state nudge / surfaced-URL dedup |
 | `merge-review-session.json` | merge-review | session baselines (engagement) |
