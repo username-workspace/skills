@@ -9,14 +9,16 @@ The Stop hook only nudges the session to launch it (a `block` continuation, once
 Read-only: it never commits, pushes, or merges, and runs no model itself. Opt a repo out with
 enabled:false.
 """
-import argparse, json, os, re, sys, time
+import argparse, json, os, sys, time
 from datetime import datetime, timezone
 from shutil import which
+from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _kernel
 from _kernel import (added_lines, bypass_in_diff,  # unused here: re-exported, the suite's pure tests call them
                      auto_engage, cmd_resolve, cur_branch, default_branch, detect_forge, fake_green,
-                     git_dir, head_sha, remote_name, repo_root, run, write_json)
+                     git_dir, gitlab_branch_project_id, head_sha, remote_name, repo_root, run,
+                     write_json)
 
 DEFAULTS = {
     "enabled": True,          # set false to opt a repo OUT (either engagement mode)
@@ -95,23 +97,104 @@ def ci_status(repo, forge, branch):
             return "none"
         return {8: "pending"}.get(rc, "failed" if rc == 1 else "none" if rc == 0 else "error")
     if forge == "gitlab":
-        rc, out, err = run(["glab", "ci", "status", "-b", branch], repo)
-        blob = out + "\n" + err
-        if rc != 0 and "no pipeline" in blob.lower():
-            return "none"
-        m = re.search(r"\bstatus:\s*([a-z]+)", blob, re.I)
-        token = (m.group(1).lower() if m else blob.lower())
-        if re.search(r"\b(failed|canceled)\b", token):
-            return "failed"
-        if re.search(r"\b(running|pending|created|preparing|manual)\b", token):
-            return "pending"
-        if re.search(r"\b(success|passed)\b", token):
-            return "success"
-        return "error" if rc != 0 else "none"
+        head = gitlab_branch_head(repo, branch)
+        if head is None:
+            return "error"
+        return ci_status_at(repo, forge, head, branch) if head else "none"
     return "error"
 
 
-def ci_status_at(repo, forge, sha):
+GITLAB_RED = ("failed", "canceled")
+
+
+def gitlab_pipelines(repo, query):
+    """Pipelines from the REST API (newest first), structured unlike glab's human output. None on error."""
+    rc, out, _ = run(["glab", "api", f"projects/:id/pipelines?{query}"], repo)
+    if rc != 0:
+        return None
+    try:
+        arr = json.loads(out or "[]")
+    except Exception:
+        return None
+    return arr if isinstance(arr, list) else None
+
+
+def glab_json(repo, path):
+    rc, out, _ = run(["glab", "api", path], repo)
+    if rc != 0:
+        return None
+    try:
+        return json.loads(out or "null")
+    except Exception:
+        return None
+
+
+def gitlab_open_mr(repo, branch):
+    """The branch's open MR with its head pipeline; {} when there is none, None on an API error. Only an
+    MR whose source is the project this branch is pushed to counts (a stranger's fork MR from a branch of
+    the same name does not; my own MR from my fork does)."""
+    query = f"source_branch={quote(branch, safe='')}&state=opened&per_page=20"
+    arr = glab_json(repo, f"projects/:id/merge_requests?{query}")
+    if not isinstance(arr, list):
+        return None
+    if not arr:
+        return {}
+    own_project = gitlab_branch_project_id(repo)
+    if own_project is None:
+        return None
+    own = [m for m in arr if m.get("source_project_id") == own_project]
+    if not own:
+        return {}
+    mr = glab_json(repo, f"projects/:id/merge_requests/{own[0].get('iid')}")
+    return mr if isinstance(mr, dict) else None
+
+
+def gitlab_branch_head(repo, branch):
+    """The sha the branch's CI verdict is about: the open MR's head, else the newest branch pipeline's."""
+    mr = gitlab_open_mr(repo, branch)
+    if mr is None:
+        return None
+    if mr:
+        return mr.get("sha") or ""
+    arr = gitlab_pipelines(repo, f"ref={quote(branch, safe='')}&per_page=20")
+    if arr is None:
+        return None
+    return next((p.get("sha") or "" for p in arr if p.get("ref") == branch), "")
+
+
+def gitlab_gating_pipelines(repo, sha, branch):
+    """The pipelines that decide `sha`'s verdict; None on an API error.
+    With an open MR, GitLab's own gate: the MR's head pipeline (branch, detached, merged-results or
+    train), once it belongs to `sha`. A merged-results or train pipeline runs on a merge commit whose
+    last parent (the MR source; the first is the target) is `sha`, so its own sha never equals it.
+    Without an MR, the newest branch pipeline of `sha`; pipelines of other refs sharing the sha
+    (policy, workload) are never its verdict."""
+    mr = gitlab_open_mr(repo, branch)
+    if mr is None:
+        return None
+    if mr:
+        hp = mr.get("head_pipeline")
+        if mr.get("sha") != sha or not hp:
+            return []
+        if hp.get("sha") == sha:
+            return [hp]
+        iid = mr.get("iid")
+        merge_refs = (f"refs/merge-requests/{iid}/merge", f"refs/merge-requests/{iid}/train")
+        if hp.get("ref") not in merge_refs:
+            return []
+        commit = glab_json(repo, f"projects/:id/repository/commits/{hp.get('sha')}")
+        if not isinstance(commit, dict):
+            return None
+        return [hp] if (commit.get("parent_ids") or [])[-1:] == [sha] else []
+    arr = gitlab_pipelines(repo, f"sha={sha}&per_page=100")
+    if arr is None:
+        return None
+    mine = sorted((p for p in arr if p.get("sha") == sha and p.get("ref") == branch),
+                  key=lambda p: p.get("id") or 0)
+    return mine[-1:]
+
+
+def ci_status_at(repo, forge, sha, branch):
     """ci_status bound to an EXACT commit — the watcher's verdict must belong to the sha it watches.
     Right after a push the forge briefly serves the previous run's branch-level result; a verdict for
     another commit is not a verdict. 'none' (nothing registered for this sha yet) keeps the poll going."""
@@ -131,19 +214,15 @@ def ci_status_at(repo, forge, sha):
             return "pending"
         return "success"
     if forge == "gitlab":
-        rc, out, _ = run(["glab", "api", f"projects/:id/pipelines?sha={sha}&per_page=1"], repo)
-        if rc != 0:
+        pipes = gitlab_gating_pipelines(repo, sha, branch)
+        if pipes is None:
             return "error"
-        try:
-            arr = json.loads(out or "[]")
-        except Exception:
-            return "error"
-        if not arr:
+        if not pipes:
             return "none"
-        st = (arr[0].get("status") or "").lower()
-        if st in ("failed", "canceled"):
+        states = [(p.get("status") or "").lower() for p in pipes]
+        if any(st in GITLAB_RED for st in states):
             return "failed"
-        if st == "success":
+        if all(st == "success" for st in states):
             return "success"
         return "pending"
     return "error"
@@ -164,8 +243,22 @@ def failing_log(repo, forge, branch, sha=None):
             return log
         return ""
     if forge == "gitlab":
-        _, log, _ = run(["glab", "ci", "trace"], repo)
-        return log
+        sha = sha or gitlab_branch_head(repo, branch) or ""
+        logs = []
+        for p in gitlab_gating_pipelines(repo, sha, branch) or []:
+            if (p.get("status") or "").lower() not in GITLAB_RED:
+                continue
+            project = p.get("project_id") or ":id"
+            jobs_path = f"projects/{project}/pipelines/{p['id']}/jobs?scope[]=failed&per_page=100"
+            _, out, _ = run(["glab", "api", jobs_path], repo)
+            try:
+                jobs = [j for j in json.loads(out or "[]") if not j.get("allow_failure")]
+            except Exception:
+                jobs = []
+            for j in jobs:
+                _, trace, _ = run(["glab", "api", f"projects/{project}/jobs/{j['id']}/trace"], repo)
+                logs.append(f"== job {j.get('name', j['id'])} (pipeline {p['id']}) ==\n{trace}")
+        return "\n".join(logs)
     return ""
 
 
@@ -374,7 +467,7 @@ def cmd_run(args):
         if not mr_open(repo, forge, branch):
             print("[mr-watchdog] stopped: no open merge request for this branch")
             return
-        status = ci_status_at(repo, forge, head)
+        status = ci_status_at(repo, forge, head, branch)
         errors = errors + 1 if status == "error" else 0
         if errors >= 5:
             print("[mr-watchdog] stopped: the forge CLI keeps failing to read CI status "
@@ -435,7 +528,7 @@ def cmd_hook(args):
     head = head_sha(repo)
     if watch_requested(repo, head):
         return
-    if ci_status_at(repo, forge, head) == "success":
+    if ci_status_at(repo, forge, head, branch) == "success":
         mark_watch_requested(repo, head)
         print(json.dumps({"decision": "block", "reason": green_instruction(branch)}))
         return

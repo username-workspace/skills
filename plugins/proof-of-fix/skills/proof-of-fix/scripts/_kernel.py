@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
 
 
@@ -61,12 +62,48 @@ def default_branch(repo, remote):
     return "main"
 
 
+def parse_remote(url):
+    """Parse an scp-style or http(s) git URL into {host, path, forge, https}. None if unrecognized."""
+    if not url:
+        return None
+    u = re.sub(r"\.git/?$", "", url.strip())
+    m = re.match(r"https?://(?:[^@/]+@)?([^/]+)/(.+)$", u) or \
+        re.match(r"ssh://(?:[^@/]+@)?([^/:]+)(?::\d+)?/(.+)$", u)
+    if not m and "://" not in u:
+        m = re.match(r"(?:[^@/]+@)?([^/:]+):(.+)$", u)
+    if not m:
+        return None
+    host, path = m.group(1), m.group(2).strip("/")
+    if "/" not in path:
+        return None
+    h = host.lower()
+    forge = "github" if "github" in h else "gitlab" if "gitlab" in h else "bitbucket" if "bitbucket" in h else "unknown"
+    return {"host": host, "path": path, "forge": forge, "https": f"https://{host}/{path}"}
+
+
+def gitlab_branch_project_id(repo):
+    """The numeric id of the GitLab project this branch is pushed to, None if unknown. A branch's own MR is
+    the one whose source is this project: in a fork clone glab resolves `:id` to the parent (an
+    `upstream` remote wins), where both my fork's MR and a stranger's show the parent as target."""
+    rc, url, _ = run(["git", "remote", "get-url", remote_name(repo) or "origin"], repo)
+    info = parse_remote(url) if rc == 0 else None
+    if not info:
+        return None
+    rc, out, _ = run(["glab", "api", f"projects/{quote(info['path'], safe='')}"], repo)
+    try:
+        return json.loads(out)["id"] if rc == 0 else None
+    except Exception:
+        return None
+
+
 def detect_forge(repo, cfg, remote):
+    """The forge is the remote HOST's (a `forge` config value overrides, e.g. a self-hosted GitLab
+    without "gitlab" in its hostname) — never a word found elsewhere in the URL."""
     if cfg.get("forge"):
         return cfg["forge"]
     rc, url, _ = run(["git", "remote", "get-url", remote or "origin"], repo)
-    h = (url or "").lower()
-    return "github" if "github" in h else "gitlab" if "gitlab" in h else "unknown"
+    info = parse_remote(url) if rc == 0 else None
+    return info["forge"] if info else "unknown"
 
 
 def git_toplevel(path):

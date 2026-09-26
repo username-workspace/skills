@@ -12,8 +12,9 @@ from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _kernel
 from _kernel import (auto_engage, carried_paths, cmd_resolve, cur_branch, git_dir, git_toplevel,
-                     marker_for_branch, marker_path, provenance_path, provenance_paths, read_marker,
-                     remote_name, repo_root, run, write_json)
+                     gitlab_branch_project_id, marker_for_branch, marker_path, parse_remote,
+                     provenance_path, provenance_paths, read_marker, remote_name, repo_root, run,
+                     write_json)
 
 DEFAULTS = {
     "on_done": "draft-pr",            # draft-pr | ready-pr | suggest
@@ -164,8 +165,23 @@ def git_state(repo):
     }
 
 
-def pr_exists(repo, branch):
-    """Returns 'open' | 'none' | 'error' — distinguishing 'no PR' from a failed gh call."""
+def pr_exists(repo, branch, cli="gh"):
+    """Returns 'open' | 'none' | 'error' — distinguishing 'no PR/MR' from a failed CLI call."""
+    if cli == "glab":
+        rc, out, _ = run(["glab", "mr", "list", "--source-branch", branch, "-F", "json"], repo)
+        if rc != 0:
+            return "error"
+        try:
+            mrs = json.loads(out or "[]")
+        except Exception:
+            return "error"
+        if not mrs:
+            return "none"
+        own_project = gitlab_branch_project_id(repo)
+        if own_project is None:
+            return "error"
+        mine = [m for m in mrs if m.get("state") == "opened" and m.get("source_project_id") == own_project]
+        return "open" if mine else "none"
     rc, out, err = run(["gh", "pr", "view", branch, "--json", "state"], repo)
     if rc == 0:
         try:
@@ -181,25 +197,6 @@ def pr_exists(repo, branch):
 def remote_url(repo, remote):
     rc, url, _ = run(["git", "remote", "get-url", remote], repo)
     return url if rc == 0 else ""
-
-
-def parse_remote(url):
-    """Parse an scp-style or http(s) git URL into {host, path, forge, https}. None if unrecognized."""
-    if not url:
-        return None
-    u = re.sub(r"\.git/?$", "", url.strip())
-    m = re.match(r"https?://(?:[^@/]+@)?([^/]+)/(.+)$", u) or \
-        re.match(r"ssh://(?:[^@/]+@)?([^/:]+)(?::\d+)?/(.+)$", u)
-    if not m and "://" not in u:
-        m = re.match(r"(?:[^@/]+@)?([^/:]+):(.+)$", u)
-    if not m:
-        return None
-    host, path = m.group(1), m.group(2).strip("/")
-    if "/" not in path:
-        return None
-    h = host.lower()
-    forge = "github" if "github" in h else "gitlab" if "gitlab" in h else "bitbucket" if "bitbucket" in h else "unknown"
-    return {"host": host, "path": path, "forge": forge, "https": f"https://{host}/{path}"}
 
 
 def pr_create_url(info, base, branch):
@@ -449,6 +446,9 @@ def run_ladder(state, verdict, gate, cfg):
                 if gitlab_push:
                     res["actions"].append("pr:gitlab-mr")
                     created = True
+                    mr = re.search(r"https?://\S+/-/merge_requests/\d+", err or "")
+                    if mr:
+                        res["pr"] = mr.group(0)
             else:
                 res["actions"].append(f"push-failed:{err[:60]}")
 
@@ -457,14 +457,16 @@ def run_ladder(state, verdict, gate, cfg):
             if info and surface_url_once(repo, state["branch"]):
                 res["actions"].append("suggest-pr")
                 res["pr_url"] = pr_create_url(info, base, state["branch"])
-        elif strategy == "gh":
-            status = pr_exists(repo, state["branch"])
+        elif strategy in ("gh", "glab"):
+            status = pr_exists(repo, state["branch"], strategy)
             if status == "open":
                 res["actions"].append("pr:exists")
             elif status == "error":
                 res["actions"].append("pr:check-failed")
             else:
-                args = ["gh", "pr", "create", "--base", base, "--head", state["branch"], "--fill"]
+                args = (["gh", "pr", "create", "--base", base, "--head", state["branch"], "--fill"]
+                        if strategy == "gh" else
+                        ["glab", "mr", "create", "--fill", "--yes", "--target-branch", base])
                 if mode == "draft-pr":
                     args.append("--draft")
                 rc, out, err = run(args, repo)
@@ -474,17 +476,6 @@ def run_ladder(state, verdict, gate, cfg):
                     created = True
                 else:
                     res["actions"].append(f"pr-failed:{err[:60]}")
-        elif strategy == "glab":
-            args = ["glab", "mr", "create", "--fill", "--yes", "--target-branch", base]
-            if mode == "draft-pr":
-                args.append("--draft")
-            rc, out, err = run(args, repo)
-            if rc == 0:
-                res["actions"].append(f"pr:{mode}")
-                res["pr"] = out
-                created = True
-            else:
-                res["actions"].append(f"pr-failed:{err[:60]}")
         else:
             if info and surface_url_once(repo, state["branch"]):
                 res["actions"].append("pr-url")

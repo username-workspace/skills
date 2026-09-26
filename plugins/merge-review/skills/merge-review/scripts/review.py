@@ -249,6 +249,37 @@ def cmd_gate(args):
 
 # --- forge-agnostic context for a local review -----------------------------------------------------
 
+GITHUB_THREADS_QUERY = ("query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name)"
+                        "{pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved "
+                        "comments(first:20){nodes{author{login} body path}}}}}}}")
+
+
+def github_open_threads(repo, number):
+    """Unresolved inline review threads — `gh pr view` has no field for them (GitLab's discussions do)."""
+    rc, out, _ = run(["gh", "api", "graphql", "-F", "owner={owner}", "-F", "name={repo}",
+                      "-F", f"number={number}", "-f", f"query={GITHUB_THREADS_QUERY}"], repo)
+    if rc != 0:
+        return []
+    try:
+        threads = json.loads(out)["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+    except Exception:
+        return []
+    return [f"[{(c.get('author') or {}).get('login', '?')} @ {c.get('path', '')}] {c.get('body', '')}"
+            for t in threads if not t.get("isResolved") for c in (t.get("comments") or {}).get("nodes", [])]
+
+
+def json_pages(out):
+    """`glab api --paginate` prints one JSON array per page, back to back, not a single array."""
+    dec, i, items = json.JSONDecoder(), 0, []
+    while True:
+        while i < len(out) and out[i].isspace():
+            i += 1
+        if i >= len(out):
+            return items
+        page, i = dec.raw_decode(out, i)
+        items += page if isinstance(page, list) else [page]
+
+
 def fetch_mr_context(repo, forge, branch):
     ctx = {"number": None, "title": None, "description": None, "unresolved": []}
     if not branch:
@@ -265,6 +296,8 @@ def fetch_mr_context(repo, forge, branch):
                     b = (r.get("body") or "").strip()
                     if b:
                         notes.append(f"[{(r.get('author') or {}).get('login', '?')}/{r.get('state', '')}] {b}")
+                if ctx["number"]:
+                    notes += github_open_threads(repo, ctx["number"])
                 ctx["unresolved"] = [n for n in notes if n.strip()][:50]
             except Exception:
                 pass
@@ -279,10 +312,11 @@ def fetch_mr_context(repo, forge, branch):
         except Exception:
             pass
         if iid:
-            rc, out, _ = run(["glab", "api", f"projects/:id/merge_requests/{iid}/discussions"], repo)
+            discussions = f"projects/:id/merge_requests/{iid}/discussions"
+            rc, out, _ = run(["glab", "api", "--paginate", discussions], repo)
             try:
                 notes = []
-                for disc in json.loads(out):
+                for disc in json_pages(out):
                     for n in (disc.get("notes") or []):
                         if not n.get("system") and not n.get("resolved"):
                             notes.append(f"[{(n.get('author') or {}).get('username', '?')}] {n.get('body', '')}")
