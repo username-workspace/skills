@@ -149,4 +149,16 @@ assert_eq "" "$out" "9. cross-session message → silent"
 out=$(prompt_payload "$d10" s1 "the export crashes, fix it" | CLAUDE_PLUGIN_ROOT="$PLUGIN" python3 "$PROMPT_HOOK")
 assert_contains 'additionalContext' "$out" "9. the session's one nudge is still there for the human bug report"
 
+# --- 10. a terminal without a session never gets a false "cleared": it is told whose repro is open ---
+d11="$ROOT/t11"; mkrepo "$d11"
+python3 "$REPRO" record --repo "$d11" --session X --cmd "false" >/dev/null 2>&1
+out=$(python3 "$REPRO" clear --repo "$d11" 2>&1); rc=$?
+assert_eq 1 "$rc" "10. clear with no repro for this session → exit 1"
+assert_contains "X" "$out" "10. clear names the session that holds the open repro"
+out=$(python3 "$REPRO" status --repo "$d11" 2>&1)
+assert_contains "X" "$out" "10. status names the session that holds the open repro"
+out=$(python3 "$REPRO" clear --repo "$d11" --session X 2>&1); rc=$?
+assert_eq 0 "$rc" "10. clear --session X → clears X's repro"
+assert_eq "{}" "$(python3 "$REPRO" status --repo "$d11" --session X 2>/dev/null)" "10. X's repro is gone"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]

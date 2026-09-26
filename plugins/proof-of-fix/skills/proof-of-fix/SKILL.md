@@ -59,9 +59,12 @@ probe. Opt a repo out with `{ "enabled": false }` in `.proof-of-fix.json`.
 ```bash
 python3 scripts/repro.py record --cmd 'pytest -x tests/test_bug.py'   # must fail to be accepted
 python3 scripts/repro.py check                                        # must pass to prove the fix
-python3 scripts/repro.py status                                       # current repro state JSON
-python3 scripts/repro.py clear                                        # drop an obsolete repro
+python3 scripts/repro.py status                                       # this session's repro state JSON
+python3 scripts/repro.py clear                                        # drop this session's obsolete repro
 ```
+
+Every command acts on the calling session (`CLAUDE_CODE_SESSION_ID`, set in Claude Code's shell). From a
+plain terminal pass `--session <id>`; `status` and `clear` name the sessions holding an open repro.
 
 ## Composes with the delivery harness
 
@@ -77,7 +80,7 @@ Only **`git`** and **Python 3** (stdlib) — the probe itself can be anything yo
 
 - The probe runs with your shell privileges at `record`/`check`/Stop time — it is given by the live
   session, never read from a cloneable file. Keep probes fast (120s cap, timeout = still failing).
-- One active repro per repo, by design (YAGNI) — fixing several bugs at once is the anti-pattern this
+- One active repro per session, by design (YAGNI) — fixing several bugs at once is the anti-pattern this
   skill exists to prevent.
 - `check` proves the recorded probe passes — it cannot prove the probe was the *right* probe. A probe
   that never captured the bug stays your responsibility (that's why the failing `record` run is part

@@ -117,12 +117,27 @@ def cmd_check(args):
     sys.exit(1)
 
 
+def no_repro_note(repo, sid):
+    others = [k for k, v in _kernel.read_sessions(state_path(repo))["sessions"].items()
+              if k != sid and v.get("status") == "open"]
+    note = f"[proof-of-fix] no repro recorded for session '{sid or '(none)'}'"
+    return note + (f"; open repro(s) in session(s): {', '.join(others)} (pass --session <id>)" if others else "")
+
+
 def cmd_status(args):
-    print(json.dumps(read_repro(args.repo, session_of(args)) or {}, indent=2))
+    sid = session_of(args)
+    st = read_repro(args.repo, sid)
+    print(json.dumps(st or {}, indent=2))
+    if not st:
+        print(no_repro_note(args.repo, sid), file=sys.stderr)
 
 
 def cmd_clear(args):
-    write_repro(args.repo, session_of(args), None)
+    sid = session_of(args)
+    if not read_repro(args.repo, sid):
+        print(no_repro_note(args.repo, sid))
+        sys.exit(1)
+    write_repro(args.repo, sid, None)
     print("[proof-of-fix] cleared")
 
 
