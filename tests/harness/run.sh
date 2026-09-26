@@ -335,6 +335,13 @@ assert_eq "no" "$(engaged_in "$dS" "/nonexistent: $ROOT/scope ")" "14b. a padded
 assert_eq "no" "$(env HARNESS_E2E_ROOT="$ROOT" CLAUDE_PROJECT_DIR="$dS" HARNESS_AUTO_ENGAGE_EXCLUDE='$HARNESS_E2E_ROOT/scope' python3 "$REVIEW" engaged --repo "$dS" --session s-sc)" \
   "14b. an exclusion written with \$VAR (a JSON settings value is not shell-expanded) still excludes"
 assert_eq "no" "$(engaged_in "$dS" "relative/tree")" "14b. an entry that cannot resolve to an absolute path fails closed"
+assert_eq "no" "$(engaged_in "$dS" '/x/$HARNESS_UNSET_VAR/tree')" "14b. an unexpanded \$VAR anywhere in an entry fails closed"
+swapped="$(dirname "$ROOT")/$(basename "$ROOT" | tr 'a-zA-Z' 'A-Za-z')/scope"
+if [ -d "$swapped" ]; then
+  assert_eq "no" "$(engaged_in "$dS" "$swapped")" "14b. case-insensitive filesystem: an entry spelled with another case still excludes"
+else
+  ok "14b. case-sensitive filesystem: another spelling is another tree (nothing to assert)"
+fi
 python3 "$SHIP" mark-done --repo "$dS" --summary w >/dev/null
 assert_eq "yes" "$(engaged_in "$ROOT/scope/home" "")" "14b. an explicit declaration still engages outside the AUTO scope"
 

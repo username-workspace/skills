@@ -195,8 +195,26 @@ def write_state(path, data):
 
 
 def _under(path, roots):
+    """Filesystem identity, not spelling: on a case-insensitive volume `~/src/ZV` is `~/src/zv`."""
+    ids = set()
+    for r in roots:
+        try:
+            st = os.stat(r)
+            ids.add((st.st_dev, st.st_ino))
+        except OSError:
+            pass
     p = os.path.realpath(path)
-    return any(p == r or p.startswith(r.rstrip(os.sep) + os.sep) for r in roots)
+    while True:
+        try:
+            st = os.stat(p)
+            if (st.st_dev, st.st_ino) in ids:
+                return True
+        except OSError:
+            pass
+        parent = os.path.dirname(p)
+        if parent == p:
+            return False
+        p = parent
 
 
 def auto_engage(repo):
@@ -212,7 +230,7 @@ def auto_engage(repo):
         return False
     entries = [os.path.expandvars(os.path.expanduser(p.strip()))
                for p in os.environ.get("HARNESS_AUTO_ENGAGE_EXCLUDE", "").split(os.pathsep) if p.strip()]
-    if not all(os.path.isabs(e) for e in entries):
+    if not all(os.path.isabs(e) and "$" not in e for e in entries):
         return False
     excluded = [os.path.realpath(e) for e in entries]
     launch = os.environ.get("CLAUDE_PROJECT_DIR")

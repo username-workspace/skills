@@ -184,7 +184,7 @@ presence files siblings couple on — but they decide nothing.
 
 Engagement is **inferred** from observed session work: HEAD or the tree advanced since the turn-start
 baseline, or the branch carries paths this session observably edited (PostToolUse provenance), or the
-branch's upstream advanced. This is the previous (pre-2.0) behaviour, preserved verbatim.
+branch's upstream advanced. The inference rules are the pre-2.0 behaviour; what is new is the scope below.
 
 Auto is **scoped** — outside the scope a plugin falls back to explicit (a declaration still works):
 
