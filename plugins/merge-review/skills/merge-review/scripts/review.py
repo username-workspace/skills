@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from shutil import which
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _kernel
-from _kernel import (auto_engage, carried_paths, cmd_resolve, cur_branch, default_branch, detect_forge,
+from _kernel import (auto_engage, carried_paths, cmd_resolve, cur_branch, default_branch, detect_forge, driven,
                      fake_green, git_dir, head_sha, marker_for_branch, provenance_paths, remote_name,
                      repo_root, run, write_json)
 
@@ -222,6 +222,10 @@ def gate_reason(repo, cfg):
             f"cannot reach {thr} without a workaround, STOP and explain instead of bypassing.")
 
 
+DRIVEN_REASON = ("This branch is driven by delivery-conductor: it pushes once the need's review has passed. "
+                 "Do not push by hand; end your turn and follow the conductor's next instruction.")
+
+
 def cmd_gate(args):
     """Pre-push decision. Emits a PreToolUse deny (stdout) when the push should wait for a review, else
     nothing (allow). Advisory: it denies a given HEAD at most once per session, so it nudges without
@@ -242,9 +246,10 @@ def cmd_gate(args):
     if blk.get("session") == args.session and blk.get("head") == head:
         return
     write_gate_block(repo, {"session": args.session, "head": head})
+    reason = DRIVEN_REASON if driven(repo, args.session) else gate_reason(repo, cfg)
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                               "permissionDecision": "deny",
-                                              "permissionDecisionReason": gate_reason(repo, cfg)}}))
+                                              "permissionDecisionReason": reason}}))
 
 
 # --- forge-agnostic context for a local review -----------------------------------------------------

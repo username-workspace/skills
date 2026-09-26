@@ -15,7 +15,7 @@ import argparse, json, os, re, subprocess, sys
 from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _kernel
-from _kernel import git_dir, repo_root, run
+from _kernel import conductor_scope, driven, git_dir, repo_root, run
 
 INTENT_RE = re.compile(
     r"\b(bugs?|broken|regressions?|r[ée]gressions?|crash(es|ed)?|plante|fix(e[rz]?|es|ed|ing)?|"
@@ -152,7 +152,7 @@ def cmd_nudge(args):
     prompt = args.prompt or ""
     if ENVELOPE_RE.match(prompt) or not INTENT_RE.search(prompt):
         return
-    if not os.path.isdir(git_dir(repo)):
+    if not os.path.isdir(git_dir(repo)) or conductor_scope(repo, args.session):
         return
     marker = os.path.join(git_dir(repo), "proof-of-fix-nudge.json")
     st = _kernel.read_sessions(marker)
@@ -173,7 +173,7 @@ def cmd_hook(args):
     st = read_repro(repo, sid)
     if not st or st.get("status") != "open" or not st.get("cmd"):
         return
-    if load_config(repo).get("enabled", True) is False:
+    if load_config(repo).get("enabled", True) is False or driven(repo, sid):
         return
     head, dirty = work_state(repo)
     nag = st.get("nag") or {}

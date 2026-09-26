@@ -11,7 +11,7 @@ from shutil import which
 from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _kernel
-from _kernel import (auto_engage, carried_paths, cmd_resolve, cur_branch, git_dir, git_toplevel,
+from _kernel import (auto_engage, carried_paths, cmd_resolve, cur_branch, driven, git_dir, git_toplevel,
                      gitlab_branch_project_id, marker_for_branch, marker_path, parse_remote,
                      provenance_path, provenance_paths, read_marker, remote_name, repo_root, run,
                      write_json)
@@ -804,7 +804,7 @@ def cmd_engage(args):
         return
     repo = os.path.abspath(args.repo)
     cfg = load_config(repo, args.config)
-    if not engaged(repo, cfg, args.session):
+    if driven(repo, args.session) or not engaged(repo, cfg, args.session):
         return
     if args.goal:
         cfg["goal"] = args.goal

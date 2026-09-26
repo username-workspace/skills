@@ -299,6 +299,40 @@ def marker_for_branch(repo, branch):
     return bool(m and m.get("branch") == branch)
 
 
+def ledger_path(repo):
+    return os.path.join(git_dir(repo), "conductor.json")
+
+
+def read_ledger(repo):
+    """delivery-conductor's need ledger as ('absent' | 'ok' | 'corrupt', ledger)."""
+    try:
+        st = json.load(open(ledger_path(repo)))
+    except FileNotFoundError:
+        return "absent", None
+    except Exception:
+        return "corrupt", None
+    if isinstance(st, dict) and isinstance(st.get("needs"), dict):
+        return "ok", st
+    return "corrupt", None
+
+
+def conductor_scope(repo, session):
+    return session in read_sessions(os.path.join(git_dir(repo), "conductor-scope.json"))["sessions"]
+
+
+def driven(repo, session):
+    """True while delivery-conductor holds the current branch for a need: every sibling stands down on
+    it. Only a session carrying the conductor's scope stamp is driven, so a ledger left behind by a
+    disabled conductor is inert; a corrupt ledger under a live conductor holds every branch."""
+    status, ledger = read_ledger(repo)
+    if status == "absent" or not conductor_scope(repo, session):
+        return False
+    if status == "corrupt":
+        return True
+    branch = cur_branch(repo)
+    return bool(branch) and any((n or {}).get("branch") == branch for n in ledger["needs"].values())
+
+
 def provenance_path(repo):
     return os.path.join(git_dir(repo), "swd-provenance.json")
 
