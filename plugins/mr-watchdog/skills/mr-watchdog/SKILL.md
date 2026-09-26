@@ -119,7 +119,6 @@ a v1 report with the stage's `state` (`done`, `pending`, `blocked`), its `eviden
 work state or sha it was produced on) and the `next` step (`script`, `background` or `skill`). A repo that
 opted this plugin out gets `{"enabled": false}` from it. See `docs/architecture.md` in the marketplace.
 
-
 ## Dependencies
 
 `git`, Python 3 (stdlib only), and a forge CLI — **`gh`** (GitHub) or **`glab`** (GitLab) — to read CI

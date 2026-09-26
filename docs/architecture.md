@@ -219,7 +219,9 @@ on, so a new HEAD sends the need back to the earliest stale stage by constructio
 Every cross-plugin write goes through the owner's CLI: ship-when-done hands engagement over with
 `review.py handoff` and `watch.py handoff`. Each owner stamps its script path in its `.git/` state for
 discovery, and a repo that opts an owner out hears it from that owner's `stage` (`"enabled": false`),
-never from a stamp that may be stale. merge-review's presence and its push hold are separate: its session
+or finds no stamp at all (merge-review and mr-watchdog stamp nothing while disabled): both refuse the
+need. The harness plugins update together; a sibling too old for `handoff` leaves the refusal in
+`.git/swd-handoff.json`. merge-review's presence and its push hold are separate: its session
 file exists whenever it is enabled, and only its `prepush_gate` flag arms ship-when-done's hold.
 
 ## 6. Engagement modes

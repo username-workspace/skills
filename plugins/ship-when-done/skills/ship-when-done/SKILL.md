@@ -157,8 +157,9 @@ a v1 report with the stage's `state` (`done`, `pending`, `blocked`), its `eviden
 work state or sha it was produced on) and the `next` step (`script`, `background` or `skill`). A repo that
 opted this plugin out gets `{"enabled": false}` from it. See `docs/architecture.md` in the marketplace.
 
-The owner steps it names are subcommands a conductor runs or instructs: `gate` (runs the detected gate in
-the background and leaves `.git/swd-gate.json` bound to the tree it started from, `stale` if the tree moved
+`stage` also takes `--summary` and `--type`, which shape the `commit` and `mark-done` steps it names. The
+owner steps are subcommands a conductor runs or instructs: `gate` (runs the detected gate, meant to be
+launched in the background, and leaves `.git/swd-gate.json` bound to the tree it started from, `stale` if the tree moved
 meanwhile), `commit`, `push` (still held while a merge-review pre-push gate has not passed the HEAD),
 `open-pr` and `mark-ready` (both consume the `mark-done` declaration; the PR is recorded in
 `.git/swd-pr.json`), and `clear-done`. `commit`, `push`, `open-pr` and `mark-ready` answer one JSON line,

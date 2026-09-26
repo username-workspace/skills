@@ -349,6 +349,8 @@ def review_gate_pending(repo):
         st = json.load(open(os.path.join(gd, "merge-review-state.json")))
     except Exception:
         return True
+    if not isinstance(st, dict):
+        return True
     rc, head, _ = run(["git", "rev-parse", "HEAD"], repo)
     return not (st.get("passed") and st.get("head") == (head if rc == 0 else None))
 
@@ -717,13 +719,13 @@ def cached_gate(repo, cmd):
     return None
 
 
-def store_gate(repo, cmd, verdict, tail="", secs=0.0, state=None):
+def store_gate(repo, cmd, verdict, tail="", secs=0.0, state=None, timeout=None):
     """Every gate run leaves evidence (verdict + output tail + duration), whatever the verdict — only
     'pass' is ever read back as a cache hit."""
     head, dirty = state or work_state(repo)
     try:
-        write_json(gate_cache_path(repo), {"head": head, "dirty": dirty, "cmd": cmd,
-                                           "verdict": verdict, "tail": tail, "secs": secs})
+        write_json(gate_cache_path(repo), {"head": head, "dirty": dirty, "cmd": cmd, "verdict": verdict,
+                                           "tail": tail, "secs": secs, "timeout": timeout})
     except OSError:
         pass
 
@@ -782,14 +784,17 @@ def stamp_sibling(repo, fname, branch, session, entry):
 def handoff(repo, fname, branch, session):
     """Hand engagement to a sibling (merge-review, mr-watchdog) for work THIS session produced, through
     the sibling's own `handoff` CLI, found at the script path its baseline stamped. Absent: inert."""
-    script = (read_state(os.path.join(git_dir(repo), fname)) or {}).get("script")
-    if not script or not os.path.isfile(script):
-        return
     try:
-        subprocess.run([sys.executable, script, "handoff", "--repo", repo, "--session", session, "--branch", branch],
-                       capture_output=True, timeout=20)
+        script = read_state(os.path.join(git_dir(repo), fname)).get("script")
+        if not script or not os.path.isfile(script):
+            return
+        r = subprocess.run([sys.executable, script, "handoff", "--repo", repo, "--session", session,
+                            "--branch", branch], capture_output=True, text=True, timeout=20)
     except Exception:
-        pass
+        return
+    if r.returncode != 0:
+        _kernel.write_state(os.path.join(git_dir(repo), "swd-handoff.json"),
+                            {"sibling": fname, "branch": branch, "rc": r.returncode, "stderr": r.stderr[-300:]})
 
 
 def watchdog_handoff(repo, session):
@@ -926,11 +931,11 @@ def cmd_gate(args):
     if not cmd:
         print('[ship-when-done] gate: none detected (set "gate" in .git/ship-when-done.json)')
         sys.exit(1)
-    before = work_state(repo)
-    verdict, tail, secs = run_gate(repo, cmd, int(cfg.get("gate_timeout", 120)))
+    before, timeout = work_state(repo), int(cfg.get("gate_timeout", 120))
+    verdict, tail, secs = run_gate(repo, cmd, timeout)
     if work_state(repo) != before:
         verdict = "stale"
-    store_gate(repo, cmd, verdict, tail, secs, before)
+    store_gate(repo, cmd, verdict, tail, secs, before, timeout)
     print(f"[ship-when-done] gate {verdict} in {secs}s")
     sys.exit(0 if verdict == "pass" else 1)
 
@@ -988,7 +993,8 @@ def cmd_open_pr(args):
     repo = args.repo
     cfg = load_config(repo, args.config)
     state, strategy, refused = owner_state(repo, cfg)
-    marker = read_marker(repo) or {}
+    marker = read_marker(repo)
+    marker = marker if isinstance(marker, dict) else {}
     if not refused and marker.get("branch") != state["branch"]:
         refused = "no-done-marker"
     if not refused and strategy not in ("gh", "glab"):
@@ -1050,6 +1056,9 @@ def cmd_stage(args):
         return
     me, n = ["python3", os.path.abspath(__file__)], ["--need", args.need, "--repo", repo]
     state = git_state(repo)
+    if not state.get("is_git"):
+        print(json.dumps(stage_report(args.stage, "blocked", {"refused": "not-a-git-repo"})))
+        return
     head, dirty = work_state(repo)
     branch = state.get("branch")
     if args.stage == "implementing":
@@ -1065,13 +1074,15 @@ def cmd_stage(args):
         d = read_state(gate_cache_path(repo)) or {}
         here = bool(cmd) and d.get("head") == head and d.get("dirty") == dirty and d.get("cmd") == cmd
         verdict = d.get("verdict") if here else None
+        if verdict == "timeout" and d.get("timeout") != int(cfg.get("gate_timeout", 120)):
+            verdict = None
         ev = {"sha": head, "gate": cmd, "verdict": verdict, "file": gate_cache_path(repo)}
         if not cmd:
             out = stage_report("gating", "blocked", ev)
         elif verdict == "pass":
             out = stage_report("gating", "done", ev)
         elif verdict in ("fail", "timeout"):
-            why = (f"timed out after {cfg.get('gate_timeout', 120)}s (find what hangs, or raise gate_timeout in "
+            why = (f"timed out after {d.get('timeout')}s (find what hangs, or raise gate_timeout in "
                    ".git/ship-when-done.json if the gate is legitimately long)" if verdict == "timeout" else "is red")
             out = stage_report("gating", "blocked", ev, "skill", skill="ship-when-done", instruction=(
                 f"The project gate `{cmd}` {why} at this work state. Fix the ROOT cause, never fake green (no "

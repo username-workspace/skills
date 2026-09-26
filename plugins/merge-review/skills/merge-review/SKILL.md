@@ -212,7 +212,6 @@ This is what the pre-push gate asks for: it denies the **first** push of an unre
 
 ---
 
-
 ## Stage protocol (delivery-conductor)
 
 `scripts/review.py stage --repo R --need N` answers, read-only, where a need stands in its `reviewing` stage:

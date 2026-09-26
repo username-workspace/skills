@@ -532,7 +532,7 @@ def cmd_stage(args):
     if verdict == "green":
         out = stage_report("ci", "done", evidence)
     elif verdict == "red":
-        verify = f"python3 {os.path.abspath(__file__)} verify --repo {repo}"
+        verify = shlex.join(["python3", os.path.abspath(__file__), "verify", "--repo", repo])
         out = stage_report("ci", "blocked", evidence, "skill", skill="mr-watchdog", instruction=(
             f"CI is red at {head[:12]} on '{v.get('branch')}'. Fix the ROOT cause from the failing log. Never "
             "fake green: no disabled, skipped, deleted or weakened test, no --no-verify, no `|| true`, no "

@@ -734,7 +734,15 @@ printf '{"gate":"echo x >> drift.txt"}' > "$d/.git/ship-when-done.json"
 out=$(python3 "$SHIP" gate --repo "$d" --need N1); rc=$?
 assert_contains 'stale' "$out" "N. a tree that moved while the gate ran → stale, never a pass"
 assert_eq 1 "$rc" "N. stale → exit 1"
-rm -f "$d/drift.txt"; printf '{"gate":"true"}' > "$d/.git/ship-when-done.json"
+rm -f "$d/drift.txt"
+printf '{"gate":"sleep 2","gate_timeout":1}' > "$d/.git/ship-when-done.json"
+python3 "$SHIP" gate --repo "$d" --need N1 >/dev/null
+assert_eq "1 blocked skill " "$(st "$d" gating)" "N. a gate that timed out at this work state → a step to look into it"
+printf '{"gate":"sleep 2","gate_timeout":10}' > "$d/.git/ship-when-done.json"
+assert_eq "1 pending background gate" "$(st "$d" gating)" "N. gate_timeout raised as the step suggests → the gate runs again"
+printf '{"gate":"sleep 2","gate_timeout":1}' > "$d/.git/ship-when-done.json"
+assert_contains 'timed out after 1s' "$(python3 "$SHIP" stage --repo "$d" --need N1 --stage gating)" "N. the step names the timeout the run actually used"
+printf '{"gate":"true"}' > "$d/.git/ship-when-done.json"
 python3 "$SHIP" commit --repo "$d" --need N1 --summary "the need" --type feat >/dev/null
 assert_eq "1 pending script mark-done" "$(st "$d" shipping)" "N. not declared → mark-done first"
 python3 "$SHIP" mark-done --repo "$d" --summary "the need" --type feat >/dev/null
@@ -781,6 +789,22 @@ git -C "$d" checkout -q -b other; python3 "$SHIP" mark-done --repo "$d" --summar
 python3 "$SHIP" mark-ready --repo "$d" --need N1 >/dev/null
 assert_contains '"branch": "other"' "$(cat "$d/.git/swd-done.json" 2>/dev/null)" "N. mark-ready never consumes another branch's declaration"
 rm -f "$d/.git/swd-done.json"
+printf 'null' > "$d/.git/merge-review-state.json"
+printf '{"v":1,"sessions":{},"script":"x","prepush_gate":true}' > "$d/.git/merge-review-session.json"
+out=$(python3 "$SHIP" push --repo "$d" --need N1 2>&1)
+assert_contains 'merge-review-pending' "$out" "N. an unreadable review record holds the push, as JSON, never a traceback"
+printf '["not", "a", "marker"]' > "$d/.git/swd-done.json"
+assert_contains 'no-done-marker' "$(python3 "$SHIP" open-pr --repo "$d" --need N1 2>&1)" "N. a malformed declaration is refused as JSON"
+rm -f "$d/.git/swd-done.json"
+nogit="$ROOT/not-a-repo"; mkdir -p "$nogit"
+assert_contains '"not-a-git-repo"' "$(python3 "$SHIP" stage --repo "$nogit" --need N1 --stage implementing 2>&1)" \
+  "N. stage outside a git repo answers a refusal, not a traceback"
+printf 'import sys\nsys.exit(2)\n' > "$ROOT/oldwatch.py"
+printf '{"v":1,"sessions":{},"script":"%s"}' "$ROOT/oldwatch.py" > "$d/.git/mr-watchdog-session.json"
+python3 -c 'import sys, importlib.util as u
+sp = u.spec_from_file_location("ship", sys.argv[1]); m = u.module_from_spec(sp); sp.loader.exec_module(m)
+m.handoff(sys.argv[2], "mr-watchdog-session.json", "need/n1", "s1")' "$SHIP" "$d"
+assert_contains '"rc": 2' "$(cat "$d/.git/swd-handoff.json" 2>/dev/null)" "N. a sibling that refuses the handoff leaves evidence (version skew is diagnosable)"
 printf '{"v":1,"sessions":{},"script":"x","prepush_gate":false}' > "$d/.git/merge-review-session.json"
 rm -f "$d/.git/merge-review-state.json"
 assert_contains '"pushed": true' "$(python3 "$SHIP" push --repo "$d" --need N1)" "N. merge-review present with prepush_gate off → no push hold"
