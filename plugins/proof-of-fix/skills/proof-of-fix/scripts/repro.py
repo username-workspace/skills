@@ -152,7 +152,7 @@ def cmd_nudge(args):
     prompt = args.prompt or ""
     if ENVELOPE_RE.match(prompt) or not INTENT_RE.search(prompt):
         return
-    if not os.path.isdir(git_dir(repo)) or conductor_scope(repo, args.session, args.prompt_id, args.transcript):
+    if not os.path.isdir(git_dir(repo)) or conductor_scope(args.session, args.prompt_id, args.transcript):
         return
     marker = os.path.join(git_dir(repo), "proof-of-fix-nudge.json")
     st = _kernel.read_sessions(marker)
