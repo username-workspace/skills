@@ -256,7 +256,7 @@ def main():
     r.add_argument("--cmd", required=True); r.add_argument("--need", default="")
     common("check", cmd_check).add_argument("--need", default="")
     sg = common("stage", cmd_stage)
-    sg.add_argument("--need", required=True); sg.add_argument("--sessions", default="")
+    sg.add_argument("--need", required=True); sg.add_argument("--sessions", required=True)
     common("status", cmd_status)
     common("clear", cmd_clear)
     common("hook", cmd_hook).add_argument("--prompt-id", default="")

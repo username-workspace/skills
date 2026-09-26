@@ -432,6 +432,12 @@ git -C "$d" commit -q --allow-empty -m next
 assert_eq "1 ci pending background run --need" "$(sg "$d")" "16. a new HEAD makes the verdict stale"
 STUB_MR_STATE=CLOSED python3 "$WATCH" run --repo "$d" >/dev/null 2>&1
 assert_contains '"verdict": "stopped"' "$(cat "$d/.git/mr-watchdog-verdict.json")" "16. a watcher that stops leaves its verdict too"
+assert_eq "1 ci blocked skill " "$(sg "$d")" "16. stopped for a reason a relaunch cannot clear (no open MR) → a step to look into it"
+assert_contains 'no open merge request' "$(python3 "$WATCH" stage --repo "$d" --need N1)" "16. the stop reason is in the evidence and the step"
+printf '{"poll_interval":1,"watch_timeout":0}' > "$d/.mr-watchdog.json"
+STUB_CI=pending python3 "$WATCH" run --need N1 --repo "$d" >/dev/null 2>&1
+assert_eq "1 ci pending background run --need" "$(sg "$d")" "16. stopped on the watch timeout → watched again"
+printf '{"poll_interval":1}' > "$d/.mr-watchdog.json"
 python3 "$WATCH" handoff --repo "$d" --session S9 --branch feat
 assert_eq yes "$(env -u HARNESS_AUTO_ENGAGE python3 "$WATCH" engaged --repo "$d" --session S9)" \
   "16. handoff engages the branch through mr-watchdog's own CLI"

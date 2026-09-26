@@ -114,7 +114,7 @@ watch for a branch its session pushed.
 
 ## Stage protocol (delivery-conductor)
 
-`scripts/watch.py stage --repo R --need N --json` answers, read-only, where a need stands in its `ci` stage:
+`scripts/watch.py stage --repo R --need N` answers, read-only, where a need stands in its `ci` stage:
 a v1 report with the stage's `state` (`done`, `pending`, `blocked`), its `evidence` (bound to the exact
 work state or sha it was produced on) and the `next` step (`script`, `background` or `skill`). A repo that
 opted this plugin out gets `{"enabled": false}` from it. See `docs/architecture.md` in the marketplace.

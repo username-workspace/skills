@@ -7,7 +7,7 @@ push of a branch this session produced until the current HEAD has a passing revi
 the per-pass state so runs are iterative, and a fake-green check the fix loop runs before committing. It
 never commits, pushes, or merges, and runs no model itself. Opt a repo out with enabled:false.
 """
-import argparse, json, os, sys
+import argparse, json, os, shlex, sys
 from datetime import datetime, timezone
 from shutil import which
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -177,9 +177,15 @@ def cmd_record(args):
             findings = json.loads(args.findings)
         except Exception:
             findings = []
+    sha = head_sha(repo)
+    if args.sha:
+        rc, sha, _ = run(["git", "rev-parse", "--verify", "--quiet", f"{args.sha}^{{commit}}"], repo)
+        if rc != 0:
+            print(f"[merge-review] ✗ --sha {args.sha} names no commit: nothing recorded")
+            sys.exit(1)
     score = int(args.score) if args.score is not None else None
     passed = bool(args.passed) or (score is not None and score >= int(cfg.get("threshold", 80)))
-    data = {"branch": cur_branch(repo), "head": args.sha or head_sha(repo), "score": score,
+    data = {"branch": cur_branch(repo), "head": sha, "score": score,
             "passed": passed, "pass": int(prev.get("pass", 0)) + 1, "findings": findings}
     write_state(repo, data)
     print(f"[merge-review] recorded pass {data['pass']}: score={score} passed={passed}")
@@ -195,19 +201,22 @@ def cmd_stage(args):
         return
     thr = int(cfg.get("threshold", 80))
     rec, head = read_state(repo) or {}, head_sha(repo)
-    record = f"python3 {os.path.abspath(__file__)} record --repo {repo} --sha {head} --score <N>"
+    record = (shlex.join(["python3", os.path.abspath(__file__), "record", "--repo", repo, "--sha", head])
+              + " --score <N> --findings '<JSON list of the findings still open>'")
     evidence = {"sha": head, "score": rec.get("score"), "threshold": thr, "file": state_path(repo)}
     if rec.get("head") == head and isinstance(rec.get("score"), int) and rec["score"] >= thr:
         print(json.dumps(stage_report("reviewing", "done", evidence)))
     elif rec.get("head") == head:
         print(json.dumps(stage_report("reviewing", "blocked", evidence, "skill", skill="merge-review", instruction=(
             f"The review recorded for HEAD {head[:12]} scored {rec.get('score')} (< {thr}). Apply its attested "
-            "findings as minimal root-cause fixes (never fake green), surface the contestable ones, then end "
-            "your turn: the conductor commits and asks for the next pass."))))
+            f"findings as minimal root-cause fixes (never fake green), surface the contestable ones, then end "
+            f"your turn: the conductor commits and asks for the next pass. Recorded findings: "
+            f"{json.dumps(rec.get('findings') or [])[:2000]}"))))
     else:
         print(json.dumps(stage_report("reviewing", "pending", evidence, "skill", skill="merge-review", instruction=(
-            f"Review HEAD {head[:12]} with the merge-review skill, fresh-eyes, judgment only (its 'When "
-            f"driven' section), and record the verdict for that exact sha: `{record}`. Then end your turn."))))
+            f"Review HEAD {head[:12]} with the merge-review skill, fresh-eyes. Judgment only: review, apply the "
+            f"attested fixes, never commit or push. Record the verdict for that exact sha: `{record}`. Then end "
+            "your turn."))))
 
 
 def cmd_handoff(args):

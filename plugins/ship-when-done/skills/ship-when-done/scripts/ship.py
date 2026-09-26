@@ -943,7 +943,10 @@ def cmd_commit(args):
         reply({"committed": False, "refused": refused}, False)
     if state["dirty"]:
         verdict = {"source": "marker", "summary": args.summary, "type": args.type}
-        commit_work(repo, build_commit_message(cfg, state, verdict))
+        try:
+            commit_work(repo, build_commit_message(cfg, state, verdict))
+        except RuntimeError as e:
+            reply({"committed": False, "error": str(e)[-300:]}, False)
     reply({"committed": state["dirty"], "sha": work_state(repo)[0]})
 
 
@@ -1026,7 +1029,8 @@ def cmd_mark_ready(args):
     if rc != 0:
         reply({"ready": False, "error": err[-300:]}, False)
     write_pr(repo, branch, ready=True)
-    clear_marker(repo)
+    if marker_for_branch(repo, branch):
+        clear_marker(repo)
     reply({"ready": True, "pr": (read_pr(repo, branch) or {}).get("url", "")})
 
 

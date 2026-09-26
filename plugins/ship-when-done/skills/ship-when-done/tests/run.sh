@@ -770,6 +770,17 @@ rm -f "$d/x.txt"; git -C "$d" checkout -q need/n1
 python3 "$SHIP" mark-done --repo "$d" --summary again >/dev/null
 python3 "$SHIP" clear-done --repo "$d" >/dev/null
 [ -f "$d/.git/swd-done.json" ] && ko "N. clear-done removes the declaration (release)" || ok "N. clear-done removes the declaration (release)"
+printf '#!/bin/sh\necho "lint failed" >&2\nexit 1\n' > "$d/.git/hooks/pre-commit"; chmod +x "$d/.git/hooks/pre-commit"
+echo y > "$d/y.txt"
+out=$(python3 "$SHIP" commit --repo "$d" --need N1 --summary s 2>&1); rc=$?
+assert_contains '"committed": false' "$out" "N. a commit the repo's hook rejects answers a JSON refusal, not a traceback"
+assert_contains 'lint failed' "$out" "N. and carries the hook's reason"
+assert_eq 1 "$rc" "N. rejected commit → exit 1"
+rm -f "$d/.git/hooks/pre-commit"; python3 "$SHIP" commit --repo "$d" --need N1 --summary s >/dev/null
+git -C "$d" checkout -q -b other; python3 "$SHIP" mark-done --repo "$d" --summary other >/dev/null; git -C "$d" checkout -q need/n1
+python3 "$SHIP" mark-ready --repo "$d" --need N1 >/dev/null
+assert_contains '"branch": "other"' "$(cat "$d/.git/swd-done.json" 2>/dev/null)" "N. mark-ready never consumes another branch's declaration"
+rm -f "$d/.git/swd-done.json"
 printf '{"v":1,"sessions":{},"script":"x","prepush_gate":false}' > "$d/.git/merge-review-session.json"
 rm -f "$d/.git/merge-review-state.json"
 assert_contains '"pushed": true' "$(python3 "$SHIP" push --repo "$d" --need N1)" "N. merge-review present with prepush_gate off → no push hold"

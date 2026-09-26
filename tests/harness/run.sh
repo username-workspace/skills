@@ -485,6 +485,17 @@ optout(){ "$@" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["s
 assert_eq "blocked False" "$(optout python3 "$SHIP" stage --repo "$d" --need N --stage gating)" "19. ship-when-done opted out → its stage says so"
 assert_eq "blocked False" "$(optout python3 "$REVIEW" stage --repo "$d" --need N)" "19. merge-review opted out → its stage says so"
 assert_eq "blocked False" "$(optout python3 "$WATCH" stage --repo "$d" --need N)" "19. mr-watchdog opted out → its stage says so"
-assert_eq "blocked False" "$(optout python3 "$REPRO" stage --repo "$d" --need N)" "19. proof-of-fix opted out → its stage says so"
+assert_eq "blocked False" "$(optout python3 "$REPRO" stage --repo "$d" --need N --sessions s18)" "19. proof-of-fix opted out → its stage says so"
+
+# --- 20. the stage command each SKILL.md documents runs exactly as written (the conductor and the model
+# read those lines) ------------------------------------------------------------------------------------
+d="$ROOT/b19"; new_repo "$d" --remote; git -C "$d" checkout -q -b need/n1
+for p in ship-when-done merge-review mr-watchdog proof-of-fix; do
+  line=$(grep -o '`scripts/[a-z]*\.py stage [^`]*`' "$REPO_ROOT/plugins/$p/skills/$p/SKILL.md" | head -1 | tr -d '`')
+  cmd=$(printf '%s' "$line" | sed -e "s#^scripts/#$REPO_ROOT/plugins/$p/skills/$p/scripts/#" -e "s# R # $d #" \
+    -e 's# N # N1 #; s# N$# N1#; s# S$# gating#; s# S # gating #; s#S1,S2#s1#')
+  [ -n "$line" ] && python3 $cmd >/dev/null 2>&1 && ok "20. $p: the documented stage command runs" \
+    || ko "20. $p: the documented stage command runs [$line]"
+done
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]

@@ -243,6 +243,11 @@ assert_eq "1 reviewing pending skill" "$(sg "$d")" "stage: a new HEAD makes the 
 assert_eq "$reviewed" "$("$PY" "$RV" prior --repo "$d" | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["head"])')" \
   "record --sha: the verdict is bound to the reviewed sha, not to HEAD"
 assert_eq "1 reviewing pending skill" "$(sg "$d")" "stage: a record for another sha never passes HEAD"
+"$PY" "$RV" record --repo "$d" --score 95 --sha "$(git -C "$d" rev-parse --short HEAD)" >/dev/null
+assert_eq "1 reviewing done none" "$(sg "$d")" "record --sha: a short sha is resolved to the full one"
+out=$("$PY" "$RV" record --repo "$d" --score 95 --sha not-a-commit 2>&1); rc=$?
+assert_eq 1 "$rc" "record --sha: a value that names no commit is refused (exit 1)"
+assert_eq "1 reviewing done none" "$(sg "$d")" "record --sha: and the refused record is not written"
 
 # --- presence is not enablement: prepush_gate:false still stamps presence, flagged off ---------------
 d="$ROOT/presence"; mkrepo "$d"; git -C "$d" checkout -q -b feat

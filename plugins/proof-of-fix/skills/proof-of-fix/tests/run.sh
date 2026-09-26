@@ -166,6 +166,8 @@ stage(){ python3 "$REPRO" stage --repo "$1" --need N1 --sessions "$2" | python3 
 print(d["v"], d["stage"], d["state"], d["next"]["kind"], " ".join(d["next"].get("run", [])[2:4]))'; }
 d12="$ROOT/t12"; mkrepo "$d12"
 assert_eq "1 proving done none " "$(stage "$d12" A)" "11. no repro recorded by the need's sessions → done"
+python3 "$REPRO" stage --repo "$d12" --need N1 >/dev/null 2>&1; rc=$?
+assert_eq 2 "$rc" "11. a proving stage asked without the need's sessions is refused, never a silent done"
 out=$(python3 "$REPRO" record --repo "$d12" --session A --need N1 --cmd "test -f fixed.txt" 2>&1)
 assert_absent 'fix the root cause' "$out" "11. record under a need prints a neutral line, no instruction"
 assert_contains '"need": "N1"' "$(python3 "$REPRO" status --repo "$d12" --session A)" "11. the repro is bound to its need"
