@@ -12,7 +12,9 @@ hermetic test suite under `tests/` (`run.sh` / `integration.sh`).
 `bash scripts/run-tests.sh` — every hermetic suite, discovered automatically, must be green. Suites
 must stay hermetic: throwaway repos, stubbed forge CLIs, shared assertions sourced from `tests/lib.sh`,
 and **every hook invocation pins `CLAUDE_PLUGIN_ROOT`** (the gate itself runs inside a Stop hook where
-it points elsewhere). CI also enforces two sync invariants: `scripts/readme.py --check` (the README
+it points elsewhere). CI runs the gate on the portability floor too — stock macOS (`/bin/bash` 3.2,
+`/usr/bin/python3` 3.9, no Homebrew) and Linux on Python 3.9 — so shipped code stays bash-3.2 and
+Python-3.9 clean, BSD- and GNU-userland alike. CI also enforces two sync invariants: `scripts/readme.py --check` (the README
 table matches `marketplace.json`) and `scripts/kernel-sync.py --check` (the vendored kernel, below).
 
 ## The shared kernel (single source, drift-proof)

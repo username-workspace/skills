@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "claude-remote-spawn",
-      "version": "1.5.1",
+      "version": "1.5.2",
       "description": "Spawn or resume a persistent, remote-controllable Claude Code session you can drive from your phone or desktop (PTY-backed, survives detached), or open one in a new local terminal tab (macOS) to watch it live where you launched it. Terminal-agnostic, cross-platform. Pick the session model with --model (any alias/id your claude accepts, passed straight to claude --model).",
       "source": "./plugins/claude-remote-spawn",
       "category": "development",
@@ -41,7 +41,7 @@
     },
     {
       "name": "coding-agent-usage",
-      "version": "1.2.2",
+      "version": "1.2.3",
       "source": "./plugins/coding-agent-usage",
       "description": "Diagnose your own Claude Code usage and benchmark it against Anthropic's published per-developer figures. Parses local transcripts into cost, tokens, sessions, model mix, tool distribution, cache efficiency, thinking and subagent rates, per-project and per-week breakdowns, and renders an interactive HTML dashboard with a log-scale percentile gauge. Benchmark figures are fetched live and cached 24h. Includes a multi-provider view (Claude + Codex + Gemini via ccusage). Cost is computed from a maintained price table and the report flags any tokens billed at a fallback rate (unrecognized model family), so accuracy is auditable rather than assumed. No account access.",
       "category": "development",
@@ -89,7 +89,7 @@
     },
     {
       "name": "proof-of-fix",
-      "version": "1.0.4",
+      "version": "1.1.2",
       "source": "./plugins/proof-of-fix",
       "description": "Evidence-first bug fixing: prove the bug BEFORE touching code (record runs the probe and accepts it only if it FAILS), fix the root cause, then prove the fix with the SAME probe (check passes only when it runs green) — red before, green after, same command. Auto-engaging: a bug-shaped prompt (en/fr) injects the protocol into context once per session per repo, and a Stop hook re-runs an open repro itself — auto-closing it on green, blocking with the failing output on red (one attempt per work-state, capped — never a Stop loop). The best probe is a real test committed with the fix, so the repro becomes a permanent regression guard. State in .git, never committed; opt out per repo. Horizontal: any repo, any stack — git + Python stdlib only.",
       "category": "development",
