@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 from shutil import which
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _kernel
-from _kernel import (auto_engage, carried_paths, cmd_resolve, cur_branch, default_branch, detect_forge, driven,
-                     fake_green, git_dir, head_sha, marker_for_branch, provenance_paths, remote_name,
+from _kernel import (auto_engage, carried_paths, cmd_resolve, cur_branch, default_branch, detect_forge,
+                     driven, fake_green, git_dir, head_sha, marker_for_branch, provenance_paths, remote_name,
                      repo_root, run, write_json)
 
 DEFAULTS = {

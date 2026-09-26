@@ -517,7 +517,8 @@ def cmd_hook(args):
     (once per HEAD, sha-bound: a stale branch-level green is not a verdict). Else nothing."""
     repo = repo_root(args.repo)
     cfg = load_config(repo, args.config)
-    if not cfg.get("enabled", True) or driven(repo, args.session, args.prompt_id) or not engaged(repo, cfg, args.session):
+    if not cfg.get("enabled", True) or driven(repo, args.session, args.prompt_id) \
+            or not engaged(repo, cfg, args.session):
         return
     try:
         branch, forge, remote = guard_state(repo, cfg)
