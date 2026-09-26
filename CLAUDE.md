@@ -31,7 +31,9 @@ in thin wrappers, so two plugins loaded in one process never cross state.
 default**: act only on a declared signal (ship-when-done's `mark-done` marker, branch-scoped strict;
 the merge-review pre-push gate; ship's handoff stamp for mr-watchdog) — no declaration → no action.
 `HARNESS_AUTO_ENGAGE=1` restores inferred engagement (baseline deltas, edit provenance, upstream
-advance). Both fail closed: any uncertainty resolves to *not engaged*.
+advance), scoped: never for a session launched outside a git work tree (`CLAUDE_PROJECT_DIR`), never
+under a path of `HARNESS_AUTO_ENGAGE_EXCLUDE`. Both fail closed: any uncertainty resolves to *not
+engaged*. Suites stay hermetic to the caller's scope — `tests/lib.sh` unsets both variables.
 
 ## The incident rule (strongly enforced)
 

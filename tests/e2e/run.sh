@@ -4,4 +4,4 @@
 #   bash tests/e2e/run.sh [--seed N] [--count N] [--scenario flow:gate:ci]
 set -u
 command -v gh >/dev/null || { echo "gh CLI required (authenticated on the sandbox forge)"; exit 1; }
-exec env -u CLAUDE_PLUGIN_ROOT -u SHIP_WHEN_DONE_EVAL python3 "$(dirname "$0")/e2e.py" "$@"
+exec env -u CLAUDE_PLUGIN_ROOT -u SHIP_WHEN_DONE_EVAL -u CLAUDE_PROJECT_DIR -u HARNESS_AUTO_ENGAGE_EXCLUDE python3 "$(dirname "$0")/e2e.py" "$@"

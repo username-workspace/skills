@@ -38,7 +38,8 @@ You launch it once (the nudge is dedup'd per pipeline HEAD). **Two engagement mo
 (explicit), only the handoff stamp ship-when-done writes when **it** pushes engages the watcher — fully
 deterministic. With `HARNESS_AUTO_ENGAGE=1` in the environment, engagement is also inferred: a companion
 `UserPromptSubmit` hook stamps the branch's pushed state at the start of each turn, and a branch **this
-session actually pushed** (its `@{u}` advanced) is engaged too. Either way a stale MR or someone else's
+session actually pushed** (its `@{u}` advanced) is engaged too (auto is scoped: never for a session
+launched outside a git repo, never under a path of `HARNESS_AUTO_ENGAGE_EXCLUDE`). Either way a stale MR or someone else's
 MR is never touched. Opt a repo **out** with `{ "enabled": false }` in `.mr-watchdog.json`.
 
 ## The watcher (`run`) — poll until resolved, then exit

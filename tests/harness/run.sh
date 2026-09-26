@@ -318,6 +318,33 @@ assert_eq "yes" "$(python3 "$REVIEW" engaged --repo "$d" --session s14)" \
 assert_eq "yes" "$(python3 "$REVIEW" engaged --repo "$d" --session s-qd)" \
   "14. untracked non-ASCII path (porcelain C-quotes it) is carried evidence too"
 
+# --- 14b. AUTO is scoped: never from a session launched outside a repo, never under an excluded path
+dS="$ROOT/scope/side"; new_repo "$dS" --remote; git -C "$dS" checkout -q -b feat
+python3 "$REVIEW" baseline --repo "$dS" --session s-sc >/dev/null
+echo w > "$dS/w.txt"; git -C "$dS" add -A; git -C "$dS" commit -qm w
+mkdir -p "$ROOT/scope/home"
+engaged_in(){ env CLAUDE_PROJECT_DIR="$1" HARNESS_AUTO_ENGAGE_EXCLUDE="$2" python3 "$REVIEW" engaged --repo "$dS" --session s-sc; }
+assert_eq "yes" "$(engaged_in "$dS" "")" "14b. session launched in the repo → AUTO engages"
+assert_eq "no" "$(engaged_in "$ROOT/scope/home" "")" "14b. session launched in a plain folder (\$HOME) → explicit only"
+assert_eq "no" "$(engaged_in "$dS" "$ROOT/scope")" "14b. repo under an excluded path → explicit only"
+assert_eq "no" "$(engaged_in "$dS/.." "")" "14b. launch dir that is not a work tree, even above the repo → explicit only"
+dX="$ROOT/scope-x"; new_repo "$dX"
+assert_eq "no" "$(engaged_in "$dX" "$dX")" "14b. session launched in an excluded repo → explicit for every repo it touches"
+assert_eq "yes" "$(engaged_in "$dS" "/nonexistent:$ROOT/scope-x")" "14b. exclusions elsewhere leave a side project AUTO"
+assert_eq "no" "$(engaged_in "$dS" "/nonexistent: $ROOT/scope ")" "14b. a padded exclusion entry still excludes"
+assert_eq "no" "$(env HARNESS_E2E_ROOT="$ROOT" CLAUDE_PROJECT_DIR="$dS" HARNESS_AUTO_ENGAGE_EXCLUDE='$HARNESS_E2E_ROOT/scope' python3 "$REVIEW" engaged --repo "$dS" --session s-sc)" \
+  "14b. an exclusion written with \$VAR (a JSON settings value is not shell-expanded) still excludes"
+assert_eq "no" "$(engaged_in "$dS" "relative/tree")" "14b. an entry that cannot resolve to an absolute path fails closed"
+assert_eq "no" "$(engaged_in "$dS" '/x/$HARNESS_UNSET_VAR/tree')" "14b. an unexpanded \$VAR anywhere in an entry fails closed"
+swapped="$(dirname "$ROOT")/$(basename "$ROOT" | tr 'a-zA-Z' 'A-Za-z')/scope"
+if [ -d "$swapped" ]; then
+  assert_eq "no" "$(engaged_in "$dS" "$swapped")" "14b. case-insensitive filesystem: an entry spelled with another case still excludes"
+else
+  ok "14b. case-sensitive filesystem: another spelling is another tree (nothing to assert)"
+fi
+python3 "$SHIP" mark-done --repo "$dS" --summary w >/dev/null
+assert_eq "yes" "$(engaged_in "$ROOT/scope/home" "")" "14b. an explicit declaration still engages outside the AUTO scope"
+
 # --- 15. EXPLICIT MODE (the default — HARNESS_AUTO_ENGAGE unset): a DECLARED single-shot delivery
 # flows through the whole pipeline exactly like AUTO. The prompt hooks still RECORD (presence files
 # the siblings couple on — the review hold, the watcher handoff); engagement itself is never inferred,

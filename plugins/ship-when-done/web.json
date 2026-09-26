@@ -7,7 +7,7 @@
     "Forge-agnostic PR/MR: uses gh/glab if present, else GitLab push options, else surfaces the PR-creation URL — no CLI dependency",
     "Done is decided from free objective signals (gate actually green, no fresh TODOs) — no per-turn model call",
     "Guardrails: branch-first, never commit/push the default branch, never auto-merge, no AI attribution",
-    "Explicit by default (a declared mark-done drives it) or self-engaging with HARNESS_AUTO_ENGAGE=1 (work this session produced, never a pre-existing dirty tree); opt out per repo; zero-config (auto-detects the gate, forge, ticket pattern, commit convention)"
+    "Explicit by default (a declared mark-done drives it) or self-engaging with HARNESS_AUTO_ENGAGE=1 (work this session produced, never a pre-existing dirty tree; scoped to sessions launched inside a repo, minus excluded trees); opt out per repo; zero-config (auto-detects the gate, forge, ticket pattern, commit convention)"
   ],
   "commands": ["ship"],
   "platforms": ["macOS", "Linux"]

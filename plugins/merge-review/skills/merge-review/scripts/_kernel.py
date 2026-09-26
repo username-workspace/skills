@@ -194,12 +194,49 @@ def write_state(path, data):
         pass
 
 
-def auto_engage():
+def _under(path, roots):
+    """Filesystem identity, not spelling: on a case-insensitive volume `~/src/ZV` is `~/src/zv`."""
+    ids = set()
+    for r in roots:
+        try:
+            st = os.stat(r)
+            ids.add((st.st_dev, st.st_ino))
+        except OSError:
+            pass
+    p = os.path.realpath(path)
+    while True:
+        try:
+            st = os.stat(p)
+            if (st.st_dev, st.st_ino) in ids:
+                return True
+        except OSError:
+            pass
+        parent = os.path.dirname(p)
+        if parent == p:
+            return False
+        p = parent
+
+
+def auto_engage(repo):
     """Engagement mode switch. Default (explicit): plugins act only on explicit protocol artifacts —
     the done-marker, ship's handoff stamp. HARNESS_AUTO_ENGAGE=1 restores inferred engagement
-    (baseline deltas, provenance ∩ branch content, upstream advance). Truthy allowlist: the truthy
-    side takes autonomous actions, so an unrecognized value must mean OFF."""
-    return os.environ.get("HARNESS_AUTO_ENGAGE", "").lower() in ("1", "true")
+    (baseline deltas, provenance ∩ branch content, upstream advance), scoped: a session launched
+    outside a git work tree (CLAUDE_PROJECT_DIR, e.g. $HOME) has no project to infer from, and a
+    launch dir or repo under a path of HARNESS_AUTO_ENGAGE_EXCLUDE (os.pathsep-separated, ~ and $VAR
+    expanded — repos that carry their own delivery harness) stays explicit; an entry that is not an
+    absolute path after expansion, or still holds a `$`, cannot be honoured, so auto stays off. Truthy allowlist: the truthy side takes
+    autonomous actions, so an unrecognized value must mean OFF."""
+    if os.environ.get("HARNESS_AUTO_ENGAGE", "").lower() not in ("1", "true"):
+        return False
+    entries = [os.path.expandvars(os.path.expanduser(p.strip()))
+               for p in os.environ.get("HARNESS_AUTO_ENGAGE_EXCLUDE", "").split(os.pathsep) if p.strip()]
+    if not all(os.path.isabs(e) and "$" not in e for e in entries):
+        return False
+    excluded = [os.path.realpath(e) for e in entries]
+    launch = os.environ.get("CLAUDE_PROJECT_DIR")
+    if launch and (not git_toplevel(launch) or _under(launch, excluded)):
+        return False
+    return not _under(repo, excluded)
 
 
 def marker_path(repo):

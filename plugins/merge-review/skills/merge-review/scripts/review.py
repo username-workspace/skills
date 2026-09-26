@@ -121,7 +121,7 @@ def engaged(repo, cfg, session):
     branch = feature_branch(repo, cfg)
     if not branch:
         return False
-    if not auto_engage():
+    if not auto_engage(repo):
         return marker_for_branch(repo, branch)
     st = read_sessions(repo)
     sess = st["sessions"].get(session)
