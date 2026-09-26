@@ -309,7 +309,8 @@ sleep 0.3
 { [ -n "$pg" ] && pgrep -g "$pg" >/dev/null 2>&1; } && ok "23. spawn → its process group is populated" || ko "23. spawn → process group populated (pg=$pg)"
 run stop "$handle" >/dev/null 2>&1 || true
 sleep 0.3
-pgrep -g "$pg" >/dev/null 2>&1 && ko "23. group survived stop — tail/process leaked" || ok "23. stop kills the whole group (no tail leak)"
+# live members only: a killed child stays a zombie (Z) until PID 1 reaps it — containers often run a PID 1 that never does
+ps -A -o pgid=,stat= | awk -v g="$pg" '$1==g && $2 !~ /^Z/' | grep -q . && ko "23. group survived stop — tail/process leaked" || ok "23. stop kills the whole group (no tail leak)"
 
 # 24. open <name> (iTerm) → opens a tab via osascript, records a window-mode session, builds a launcher
 : > "$ROOT/osascript.cap"
