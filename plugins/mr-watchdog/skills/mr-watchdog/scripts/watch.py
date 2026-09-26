@@ -129,13 +129,15 @@ def glab_json(repo, path):
 
 
 def gitlab_open_mr(repo, branch):
-    """The branch's open MR with its head pipeline; {} when there is none, None on an API error."""
-    arr = glab_json(repo, f"projects/:id/merge_requests?source_branch={quote(branch, safe='')}&state=opened&per_page=1")
+    """The branch's open MR with its head pipeline; {} when there is none, None on an API error. A fork's
+    MR from a branch of the same name is someone else's: only an MR whose source is this project counts."""
+    arr = glab_json(repo, f"projects/:id/merge_requests?source_branch={quote(branch, safe='')}&state=opened&per_page=20")
     if not isinstance(arr, list):
         return None
-    if not arr:
+    own = [m for m in arr if m.get("source_project_id") == m.get("project_id")]
+    if not own:
         return {}
-    mr = glab_json(repo, f"projects/:id/merge_requests/{arr[0].get('iid')}")
+    mr = glab_json(repo, f"projects/:id/merge_requests/{own[0].get('iid')}")
     return mr if isinstance(mr, dict) else None
 
 
@@ -167,6 +169,8 @@ def gitlab_gating_pipelines(repo, sha, branch):
             return []
         if hp.get("sha") == sha:
             return [hp]
+        if hp.get("ref") not in (f"refs/merge-requests/{mr.get('iid')}/merge", f"refs/merge-requests/{mr.get('iid')}/train"):
+            return []
         commit = glab_json(repo, f"projects/:id/repository/commits/{hp.get('sha')}")
         if not isinstance(commit, dict):
             return None
@@ -233,13 +237,14 @@ def failing_log(repo, forge, branch, sha=None):
         for p in gitlab_gating_pipelines(repo, sha, branch) or []:
             if (p.get("status") or "").lower() not in GITLAB_RED:
                 continue
-            _, out, _ = run(["glab", "api", f"projects/:id/pipelines/{p['id']}/jobs?scope[]=failed&per_page=100"], repo)
+            project = p.get("project_id") or ":id"
+            _, out, _ = run(["glab", "api", f"projects/{project}/pipelines/{p['id']}/jobs?scope[]=failed&per_page=100"], repo)
             try:
                 jobs = [j for j in json.loads(out or "[]") if not j.get("allow_failure")]
             except Exception:
                 jobs = []
             for j in jobs:
-                _, trace, _ = run(["glab", "api", f"projects/:id/jobs/{j['id']}/trace"], repo)
+                _, trace, _ = run(["glab", "api", f"projects/{project}/jobs/{j['id']}/trace"], repo)
                 logs.append(f"== job {j.get('name', j['id'])} (pipeline {p['id']}) ==\n{trace}")
         return "\n".join(logs)
     return ""

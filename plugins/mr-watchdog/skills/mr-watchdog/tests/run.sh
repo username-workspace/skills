@@ -161,7 +161,7 @@ d = os.path.dirname(R)
 mrs, mr, commit = (os.path.join(d, n) for n in ("mrs.json", "mr.json", "commit.json"))
 os.environ.update(STUB_GL_MRS=mrs, STUB_GL_MR=mr, STUB_GL_COMMIT=commit)
 def with_mr(mr_sha, hp, parents=()):
-    json.dump([{"iid": 4, "sha": mr_sha}], open(mrs, "w"))
+    json.dump([{"iid": 4, "sha": mr_sha, "project_id": 1, "source_project_id": 1}], open(mrs, "w"))
     json.dump({"iid": 4, "sha": mr_sha, "head_pipeline": hp}, open(mr, "w"))
     json.dump({"id": (hp or {}).get("sha"), "parent_ids": list(parents)}, open(commit, "w"))
 json.dump([{"id":9,"ref":"feat","status":"skipped","sha":sha}], open(fx,"w"))
@@ -183,6 +183,19 @@ ck(watch.ci_status_at(R, "gitlab", sha, "feat")=="pending", "the MR pipeline sti
 with_mr(sha, merge, parents=("b"*40, sha))
 json.dump([{"id":7,"name":"test","status":"failed","allow_failure":False}], open(jobs,"w"))
 ck("JOB 7 FAILED" in watch.failing_log(R, "gitlab", "feat", sha), "the failing log comes from the MR's gating pipeline")
+with_mr(sha, {"id": 21, "ref": "feat", "sha": "d"*40, "status": "success"}, parents=(sha,))
+ck(watch.ci_status_at(R, "gitlab", sha, "feat")=="none",
+   "a stale branch pipeline built on a child commit is not this sha's verdict (the parent rule is for merge refs)")
+with_mr(sha, dict(merge, ref="refs/merge-requests/4/train", status="success"), parents=("b"*40, sha))
+ck(watch.ci_status_at(R, "gitlab", sha, "feat")=="success", "a merge-train pipeline for this sha is the verdict")
+json.dump([{"iid": 9, "sha": "f"*40, "project_id": 1, "source_project_id": 2}], open(mrs, "w"))
+json.dump([{"id":30,"ref":"feat","status":"failed","sha":sha}], open(fx,"w"))
+ck(watch.ci_status_at(R, "gitlab", sha, "feat")=="failed",
+   "another contributor's fork MR on the same branch name is not this branch's MR")
+log_path = os.path.join(d, "glapi.log"); os.environ["GL_API_LOG"] = log_path; open(log_path, "w").close()
+with_mr(sha, dict(merge, project_id=77), parents=("b"*40, sha))
+watch.failing_log(R, "gitlab", "feat", sha)
+ck("projects/77/pipelines/20/jobs" in open(log_path).read(), "jobs of a pipeline that lives in another project are read from that project")
 PY
 out=$(python3 "$ROOT/t2g.py" "$SCRIPTS" "$ROOT/gl" 2>&1); rc=$?
 while IFS= read -r l; do case "$l" in PASS*) ok "${l#PASS }";; FAIL*) ko "${l#FAIL }";; esac; done <<< "$out"

@@ -47,7 +47,7 @@ cat > "$ROOT/forgebin/glab" <<'EOF'
 case "$1 $2" in
   "mr list") echo '[{"iid":4,"title":"T","description":"D"}]';;
   api*) case " $* " in
-          *" --paginate "*) echo '[{"notes":[{"body":"PAGE-1-NOTE","author":{"username":"a"}}]},{"notes":[{"body":"PAGE-2-NOTE","author":{"username":"b"}}]}]';;
+          *" --paginate "*) printf '%s' '[{"notes":[{"body":"PAGE-1-NOTE","author":{"username":"a"}}]}][{"notes":[{"body":"PAGE-2-NOTE","author":{"username":"b"}}]}]';;
           *) echo '[{"notes":[{"body":"PAGE-1-NOTE","author":{"username":"a"}}]}]';;
         esac;;
 esac

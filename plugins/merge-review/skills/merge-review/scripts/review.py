@@ -268,6 +268,18 @@ def github_open_threads(repo, number):
             for t in threads if not t.get("isResolved") for c in (t.get("comments") or {}).get("nodes", [])]
 
 
+def json_pages(out):
+    """`glab api --paginate` prints one JSON array per page, back to back, not a single array."""
+    dec, i, items = json.JSONDecoder(), 0, []
+    while True:
+        while i < len(out) and out[i].isspace():
+            i += 1
+        if i >= len(out):
+            return items
+        page, i = dec.raw_decode(out, i)
+        items += page if isinstance(page, list) else [page]
+
+
 def fetch_mr_context(repo, forge, branch):
     ctx = {"number": None, "title": None, "description": None, "unresolved": []}
     if not branch:
@@ -303,7 +315,7 @@ def fetch_mr_context(repo, forge, branch):
             rc, out, _ = run(["glab", "api", "--paginate", f"projects/:id/merge_requests/{iid}/discussions"], repo)
             try:
                 notes = []
-                for disc in json.loads(out):
+                for disc in json_pages(out):
                     for n in (disc.get("notes") or []):
                         if not n.get("system") and not n.get("resolved"):
                             notes.append(f"[{(n.get('author') or {}).get('username', '?')}] {n.get('body', '')}")
