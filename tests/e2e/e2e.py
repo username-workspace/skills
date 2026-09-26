@@ -359,9 +359,10 @@ def twist_preexisting_dirty(tag):
     workdir, branch, session, tp = twist_setup(tag, "preexisting-dirty")
     open(os.path.join(workdir, "precious-wip.txt"), "w").write("someone else's uncommitted work\n")
     baselines(workdir, session)
+    _, n0, _ = sh(["git", "-C", workdir, "rev-list", "--count", "HEAD"])
     out = stop(workdir, session, tp)
     _, n, _ = sh(["git", "-C", workdir, "rev-list", "--count", "HEAD"])
-    expect(n == "1", "pre-existing dirty tree: no commit", out)
+    expect(n == n0, "pre-existing dirty tree: no commit", out)
     expect(os.path.isfile(os.path.join(workdir, "precious-wip.txt")), "the dirty file is untouched", out)
     expect(pr_state(branch) is None, "nothing reached the forge", out)
 
@@ -373,9 +374,10 @@ def twist_wip_branch(tag):
     baselines(workdir, session)
     work(workdir, "spike", "green")
     sh([sys.executable, SHIP, "mark-done", "--repo", workdir, "--summary", "spike"], check=True)
+    _, n0, _ = sh(["git", "-C", workdir, "rev-list", "--count", "HEAD"])
     out = stop(workdir, session, tp)
     _, n, _ = sh(["git", "-C", workdir, "rev-list", "--count", "HEAD"])
-    expect(n == "1", "wip/ branch: no commit, no ladder", out)
+    expect(n == n0, "wip/ branch: no commit, no ladder", out)
 
 
 def twist_amend_after_push(tag):
@@ -535,6 +537,16 @@ def file_issue(sc, tag, err):
             f"**Scenario**: `{json.dumps(sc)}`  ·  **tag**: `{tag}`\n"
             f"**Reproduce**: `python3 tests/e2e/e2e.py --scenario {repro}`"
             f"\n\n```\n{str(err)[-4000:]}\n```")
+    prefix = f"e2e: persistent failure — {what} ("
+    _, out, _ = sh(["gh", "issue", "list", "--repo", ISSUE_REPO, "--state", "open", "--search",
+                    f'"{what}" in:title', "--json", "number,title"])
+    try:
+        open_issue = next((i["number"] for i in json.loads(out or "[]") if i["title"].startswith(prefix)), None)
+    except Exception:
+        open_issue = None
+    if open_issue:
+        sh(["gh", "issue", "comment", str(open_issue), "--repo", ISSUE_REPO, "--body", body])
+        return
     rc, _, _ = sh(["gh", "issue", "create", "--repo", ISSUE_REPO, "--title", title, "--body", body,
                    "--label", "e2e"])
     if rc != 0:

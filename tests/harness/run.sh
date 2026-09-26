@@ -374,5 +374,21 @@ json.dump(cov, open(e2e.COVERAGE, "w"))
 PY
 last=$(python3 -c 'import sys; print(sorted(sys.argv[1].split())[-1])' "$all")
 assert_eq "$last" "$(fill_labels)" "16. --fill re-proves exactly the stale situation, whatever its space"
+mkdir -p "$ROOT/ghdup"; export GHDUP_LOG="$ROOT/ghdup.log"; : > "$GHDUP_LOG"
+cat > "$ROOT/ghdup/gh" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >> "$GHDUP_LOG"
+[ "$1 $2" = "issue list" ] && echo '[{"number":67,"title":"e2e: persistent failure — twist/wip-branch (seed tag s1)"}]'
+exit 0
+EOF
+chmod +x "$ROOT/ghdup/gh"
+file_issue(){ PATH="$ROOT/ghdup:$PATH" python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import e2e
+e2e.file_issue(json.loads(sys.argv[2]), "s9", "boom")' "$dL/tests/e2e" "$1"; }
+cp "$REPO_ROOT/tests/e2e/e2e.py" "$dL/tests/e2e/"
+file_issue '{"twist": "wip-branch"}'
+assert_contains "issue comment 67" "$(cat "$GHDUP_LOG")" "16. a scenario already failing in an open issue gets a comment there"
+assert_absent "issue create" "$(cat "$GHDUP_LOG")" "16. never a duplicate issue for the same scenario"
+: > "$GHDUP_LOG"; file_issue '{"twist": "preexisting-dirty"}'
+assert_contains "issue create" "$(cat "$GHDUP_LOG")" "16. a new failing scenario still files its own issue"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]
