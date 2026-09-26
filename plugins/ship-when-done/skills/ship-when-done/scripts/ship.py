@@ -171,7 +171,8 @@ def pr_exists(repo, branch, cli="gh"):
         if rc != 0:
             return "error"
         try:
-            return "open" if any(m.get("state") == "opened" for m in json.loads(out or "[]")) else "none"
+            return "open" if any(m.get("state") == "opened" and m.get("source_project_id") == m.get("project_id")
+                                 for m in json.loads(out or "[]")) else "none"
         except Exception:
             return "error"
     rc, out, err = run(["gh", "pr", "view", branch, "--json", "state"], repo)

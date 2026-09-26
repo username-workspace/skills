@@ -119,7 +119,7 @@ status and logs. The fix runs in your interactive session.
   CLI's human output: on GitHub the commit's latest check runs; on GitLab, when the branch has an open
   MR, the MR's head pipeline (GitLab's own merge gate, whether branch, detached, merged-results or
   merge-train), once it belongs to the watched sha (a merged-results pipeline runs on a merge commit
-  whose parents include it); without an MR, the newest branch pipeline of that sha. Only `success` is
+  whose last parent, the MR source, is that sha); without an MR, the newest branch pipeline of that sha. Only `success` is
   green, `failed`/`canceled` red, anything else keeps polling. Pipelines of other refs sharing the sha
   (security policy, workloads) are never its verdict. On red, the log is the gating pipeline's failed
   job traces (allowed-to-fail jobs excluded). Nothing registered yet for the sha → `none`, and the

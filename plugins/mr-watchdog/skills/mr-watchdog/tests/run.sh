@@ -186,6 +186,9 @@ ck("JOB 7 FAILED" in watch.failing_log(R, "gitlab", "feat", sha), "the failing l
 with_mr(sha, {"id": 21, "ref": "feat", "sha": "d"*40, "status": "success"}, parents=(sha,))
 ck(watch.ci_status_at(R, "gitlab", sha, "feat")=="none",
    "a stale branch pipeline built on a child commit is not this sha's verdict (the parent rule is for merge refs)")
+with_mr(sha, dict(merge, status="success"), parents=(sha, "e"*40))
+ck(watch.ci_status_at(R, "gitlab", sha, "feat")=="none",
+   "the sha as the merge commit's first (target) parent is not the MR source: no verdict")
 with_mr(sha, dict(merge, ref="refs/merge-requests/4/train", status="success"), parents=("b"*40, sha))
 ck(watch.ci_status_at(R, "gitlab", sha, "feat")=="success", "a merge-train pipeline for this sha is the verdict")
 json.dump([{"iid": 9, "sha": "f"*40, "project_id": 1, "source_project_id": 2}], open(mrs, "w"))

@@ -392,6 +392,10 @@ echo x > "$d/a.txt"; : > "$GLAB_LOG"
 out=$(GLAB_MR_LIST_RC=1 forge_ladder "$d" "$ROOT/glabbin:$ROOT/realbin")
 assert_contains 'pr:check-failed' "$out" "25b. glab mr list failing → check-failed, never a blind create"
 assert_absent 'mr create' "$(cat "$GLAB_LOG")" "25b. no create when the lookup failed"
+d="$ROOT/t25d"; new_repo "$d" --remote gitlab.com; git -C "$d" checkout -q -b feat
+echo x > "$d/a.txt"; : > "$GLAB_LOG"
+out=$(GLAB_MR_LIST='[{"iid":8,"state":"opened","project_id":1,"source_project_id":2}]' forge_ladder "$d" "$ROOT/glabbin:$ROOT/realbin")
+assert_contains 'mr create' "$(cat "$GLAB_LOG")" "25b. another contributor's fork MR on the same branch name does not stop this branch's MR"
 
 # 26. gitlab WITHOUT glab → MR requested through git push options (no CLI)  [forge case 2]
 d="$ROOT/t26"; new_repo "$d" --remote gitlab.com; git -C "$d" checkout -q -b feat

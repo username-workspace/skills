@@ -158,7 +158,7 @@ def gitlab_gating_pipelines(repo, sha, branch):
     """The pipelines that decide `sha`'s verdict; None on an API error.
     With an open MR, GitLab's own gate: the MR's head pipeline (branch, detached, merged-results or
     train), once it belongs to `sha`. A merged-results or train pipeline runs on a merge commit whose
-    parents include `sha`, so its own sha never equals it. Without an MR, the branch pipelines of `sha`,
+    last parent (the MR source; the first is the target) is `sha`, so its own sha never equals it. Without an MR, the branch pipelines of `sha`,
     newest first (a re-run supersedes); pipelines of other refs sharing the sha are not its verdict."""
     mr = gitlab_open_mr(repo, branch)
     if mr is None:
@@ -174,7 +174,7 @@ def gitlab_gating_pipelines(repo, sha, branch):
         commit = glab_json(repo, f"projects/:id/repository/commits/{hp.get('sha')}")
         if not isinstance(commit, dict):
             return None
-        return [hp] if sha in (commit.get("parent_ids") or []) else []
+        return [hp] if (commit.get("parent_ids") or [])[-1:] == [sha] else []
     arr = gitlab_pipelines(repo, f"sha={sha}&per_page=100")
     if arr is None:
         return None
