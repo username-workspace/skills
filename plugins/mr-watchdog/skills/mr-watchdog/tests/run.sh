@@ -65,6 +65,7 @@ PY
        *"/merge_requests?"*) if [ -n "${STUB_GL_MRS:-}" ]; then cat "$STUB_GL_MRS"; else echo '[]'; fi;;
        */merge_requests/*) cat "${STUB_GL_MR:-/dev/null}";;
        */repository/commits/*) cat "${STUB_GL_COMMIT:-/dev/null}";;
+       projects/test%2Frepo) echo "{\"id\":${STUB_GL_PROJECT_ID:-1}}";;
        *) echo '[]';;
      esac;;
   *) exit 0;;
@@ -156,7 +157,7 @@ ck("JOB 31" not in log, "an allowed-to-fail job is not the failure")
 ck("INTERACTIVE-PICKER" not in log, "never the interactive glab ci trace")
 ck("JOB 7 FAILED" in watch.failing_log(R, "gitlab", "feat"), "branch-level failing log resolves the latest pipeline")
 # With an open MR, GitLab's own gate decides: the MR's head pipeline, whatever its kind. A merged-results
-# or train pipeline runs on a merge commit whose parents include the watched sha.
+# or train pipeline runs on a merge commit whose last parent is the watched sha.
 d = os.path.dirname(R)
 mrs, mr, commit = (os.path.join(d, n) for n in ("mrs.json", "mr.json", "commit.json"))
 os.environ.update(STUB_GL_MRS=mrs, STUB_GL_MR=mr, STUB_GL_COMMIT=commit)
@@ -195,6 +196,13 @@ json.dump([{"iid": 9, "sha": "f"*40, "project_id": 1, "source_project_id": 2}], 
 json.dump([{"id":30,"ref":"feat","status":"failed","sha":sha}], open(fx,"w"))
 ck(watch.ci_status_at(R, "gitlab", sha, "feat")=="failed",
    "another contributor's fork MR on the same branch name is not this branch's MR")
+os.environ["STUB_GL_PROJECT_ID"] = "2"
+json.dump([{"iid": 4, "sha": sha, "project_id": 1, "source_project_id": 2}], open(mrs, "w"))
+json.dump({"iid": 4, "sha": sha, "head_pipeline": dict(merge, status="success")}, open(mr, "w"))
+json.dump({"parent_ids": ["b"*40, sha]}, open(commit, "w"))
+ck(watch.ci_status_at(R, "gitlab", sha, "feat")=="success",
+   "working from my fork (glab resolves the parent): my MR's gate is the verdict")
+os.environ["STUB_GL_PROJECT_ID"] = "1"
 log_path = os.path.join(d, "glapi.log"); os.environ["GL_API_LOG"] = log_path; open(log_path, "w").close()
 with_mr(sha, dict(merge, project_id=77), parents=("b"*40, sha))
 watch.failing_log(R, "gitlab", "feat", sha)

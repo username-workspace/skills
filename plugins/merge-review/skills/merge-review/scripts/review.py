@@ -312,7 +312,8 @@ def fetch_mr_context(repo, forge, branch):
         except Exception:
             pass
         if iid:
-            rc, out, _ = run(["glab", "api", "--paginate", f"projects/:id/merge_requests/{iid}/discussions"], repo)
+            discussions = f"projects/:id/merge_requests/{iid}/discussions"
+            rc, out, _ = run(["glab", "api", "--paginate", discussions], repo)
             try:
                 notes = []
                 for disc in json_pages(out):

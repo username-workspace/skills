@@ -12,8 +12,9 @@ from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _kernel
 from _kernel import (auto_engage, carried_paths, cmd_resolve, cur_branch, git_dir, git_toplevel,
-                     marker_for_branch, marker_path, parse_remote, provenance_path, provenance_paths,
-                     read_marker, remote_name, repo_root, run, write_json)
+                     gitlab_branch_project_id, marker_for_branch, marker_path, parse_remote,
+                     provenance_path, provenance_paths, read_marker, remote_name, repo_root, run,
+                     write_json)
 
 DEFAULTS = {
     "on_done": "draft-pr",            # draft-pr | ready-pr | suggest
@@ -171,10 +172,16 @@ def pr_exists(repo, branch, cli="gh"):
         if rc != 0:
             return "error"
         try:
-            return "open" if any(m.get("state") == "opened" and m.get("source_project_id") == m.get("project_id")
-                                 for m in json.loads(out or "[]")) else "none"
+            mrs = json.loads(out or "[]")
         except Exception:
             return "error"
+        if not mrs:
+            return "none"
+        own_project = gitlab_branch_project_id(repo)
+        if own_project is None:
+            return "error"
+        mine = [m for m in mrs if m.get("state") == "opened" and m.get("source_project_id") == own_project]
+        return "open" if mine else "none"
     rc, out, err = run(["gh", "pr", "view", branch, "--json", "state"], repo)
     if rc == 0:
         try:

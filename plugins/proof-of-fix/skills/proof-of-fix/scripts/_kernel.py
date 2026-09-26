@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
 
 
@@ -78,6 +79,21 @@ def parse_remote(url):
     h = host.lower()
     forge = "github" if "github" in h else "gitlab" if "gitlab" in h else "bitbucket" if "bitbucket" in h else "unknown"
     return {"host": host, "path": path, "forge": forge, "https": f"https://{host}/{path}"}
+
+
+def gitlab_branch_project_id(repo):
+    """The numeric id of the GitLab project this branch is pushed to, None if unknown. A branch's own MR is
+    the one whose source is this project: in a fork clone glab resolves `:id` to the parent (an
+    `upstream` remote wins), where both my fork's MR and a stranger's show the parent as target."""
+    rc, url, _ = run(["git", "remote", "get-url", remote_name(repo) or "origin"], repo)
+    info = parse_remote(url) if rc == 0 else None
+    if not info:
+        return None
+    rc, out, _ = run(["glab", "api", f"projects/{quote(info['path'], safe='')}"], repo)
+    try:
+        return json.loads(out)["id"] if rc == 0 else None
+    except Exception:
+        return None
 
 
 def detect_forge(repo, cfg, remote):

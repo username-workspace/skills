@@ -17,7 +17,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _kernel
 from _kernel import (added_lines, bypass_in_diff,  # unused here: re-exported, the suite's pure tests call them
                      auto_engage, cmd_resolve, cur_branch, default_branch, detect_forge, fake_green,
-                     git_dir, head_sha, remote_name, repo_root, run, write_json)
+                     git_dir, gitlab_branch_project_id, head_sha, remote_name, repo_root, run,
+                     write_json)
 
 DEFAULTS = {
     "enabled": True,          # set false to opt a repo OUT (either engagement mode)
@@ -107,7 +108,7 @@ GITLAB_RED = ("failed", "canceled")
 
 
 def gitlab_pipelines(repo, query):
-    """Pipelines from the REST API (newest first) — structured, unlike glab's human output. None on error."""
+    """Pipelines from the REST API (newest first), structured unlike glab's human output. None on error."""
     rc, out, _ = run(["glab", "api", f"projects/:id/pipelines?{query}"], repo)
     if rc != 0:
         return None
@@ -129,12 +130,19 @@ def glab_json(repo, path):
 
 
 def gitlab_open_mr(repo, branch):
-    """The branch's open MR with its head pipeline; {} when there is none, None on an API error. A fork's
-    MR from a branch of the same name is someone else's: only an MR whose source is this project counts."""
-    arr = glab_json(repo, f"projects/:id/merge_requests?source_branch={quote(branch, safe='')}&state=opened&per_page=20")
+    """The branch's open MR with its head pipeline; {} when there is none, None on an API error. Only an
+    MR whose source is the project this branch is pushed to counts (a stranger's fork MR from a branch of
+    the same name does not; my own MR from my fork does)."""
+    query = f"source_branch={quote(branch, safe='')}&state=opened&per_page=20"
+    arr = glab_json(repo, f"projects/:id/merge_requests?{query}")
     if not isinstance(arr, list):
         return None
-    own = [m for m in arr if m.get("source_project_id") == m.get("project_id")]
+    if not arr:
+        return {}
+    own_project = gitlab_branch_project_id(repo)
+    if own_project is None:
+        return None
+    own = [m for m in arr if m.get("source_project_id") == own_project]
     if not own:
         return {}
     mr = glab_json(repo, f"projects/:id/merge_requests/{own[0].get('iid')}")
@@ -158,8 +166,9 @@ def gitlab_gating_pipelines(repo, sha, branch):
     """The pipelines that decide `sha`'s verdict; None on an API error.
     With an open MR, GitLab's own gate: the MR's head pipeline (branch, detached, merged-results or
     train), once it belongs to `sha`. A merged-results or train pipeline runs on a merge commit whose
-    last parent (the MR source; the first is the target) is `sha`, so its own sha never equals it. Without an MR, the branch pipelines of `sha`,
-    newest first (a re-run supersedes); pipelines of other refs sharing the sha are not its verdict."""
+    last parent (the MR source; the first is the target) is `sha`, so its own sha never equals it.
+    Without an MR, the newest branch pipeline of `sha`; pipelines of other refs sharing the sha
+    (policy, workload) are never its verdict."""
     mr = gitlab_open_mr(repo, branch)
     if mr is None:
         return None
@@ -169,7 +178,9 @@ def gitlab_gating_pipelines(repo, sha, branch):
             return []
         if hp.get("sha") == sha:
             return [hp]
-        if hp.get("ref") not in (f"refs/merge-requests/{mr.get('iid')}/merge", f"refs/merge-requests/{mr.get('iid')}/train"):
+        iid = mr.get("iid")
+        merge_refs = (f"refs/merge-requests/{iid}/merge", f"refs/merge-requests/{iid}/train")
+        if hp.get("ref") not in merge_refs:
             return []
         commit = glab_json(repo, f"projects/:id/repository/commits/{hp.get('sha')}")
         if not isinstance(commit, dict):
@@ -238,7 +249,8 @@ def failing_log(repo, forge, branch, sha=None):
             if (p.get("status") or "").lower() not in GITLAB_RED:
                 continue
             project = p.get("project_id") or ":id"
-            _, out, _ = run(["glab", "api", f"projects/{project}/pipelines/{p['id']}/jobs?scope[]=failed&per_page=100"], repo)
+            jobs_path = f"projects/{project}/pipelines/{p['id']}/jobs?scope[]=failed&per_page=100"
+            _, out, _ = run(["glab", "api", jobs_path], repo)
             try:
                 jobs = [j for j in json.loads(out or "[]") if not j.get("allow_failure")]
             except Exception:

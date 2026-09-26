@@ -54,6 +54,7 @@ cat > "$ROOT/glabbin/glab" <<EOF
 echo "\$@" >> "$GLAB_LOG"
 [ "\$1 \$2" = "mr create" ] && { echo "https://gitlab.test/mr/1"; exit 0; }
 [ "\$1 \$2" = "mr list" ] && { [ -n "\${GLAB_MR_LIST_RC:-}" ] && exit "\$GLAB_MR_LIST_RC"; echo "\${GLAB_MR_LIST:-[]}"; exit 0; }
+[ "\$1" = "api" ] && case "\$2" in projects/*) echo "{\"id\":\${GLAB_PROJECT_ID:-1}}"; exit 0;; esac
 exit 0
 EOF
 chmod +x "$ROOT/glabbin/glab"
@@ -384,7 +385,7 @@ assert_contains '--target-branch main' "$(cat "$GLAB_LOG")" "25. target branch p
 # 25b. gitlab: an MR already open for the branch → no second create (the gh path's guard, test 23)
 d="$ROOT/t25b"; new_repo "$d" --remote gitlab.com; git -C "$d" checkout -q -b feat
 echo x > "$d/a.txt"; : > "$GLAB_LOG"
-out=$(GLAB_MR_LIST='[{"iid":3,"state":"opened"}]' forge_ladder "$d" "$ROOT/glabbin:$ROOT/realbin")
+out=$(GLAB_MR_LIST='[{"iid":3,"state":"opened","project_id":1,"source_project_id":1}]' forge_ladder "$d" "$ROOT/glabbin:$ROOT/realbin")
 assert_contains 'pr:exists' "$out" "25b. open MR on the branch → pr:exists"
 assert_absent 'mr create' "$(cat "$GLAB_LOG")" "25b. no duplicate glab mr create"
 d="$ROOT/t25c"; new_repo "$d" --remote gitlab.com; git -C "$d" checkout -q -b feat
@@ -395,7 +396,12 @@ assert_absent 'mr create' "$(cat "$GLAB_LOG")" "25b. no create when the lookup f
 d="$ROOT/t25d"; new_repo "$d" --remote gitlab.com; git -C "$d" checkout -q -b feat
 echo x > "$d/a.txt"; : > "$GLAB_LOG"
 out=$(GLAB_MR_LIST='[{"iid":8,"state":"opened","project_id":1,"source_project_id":2}]' forge_ladder "$d" "$ROOT/glabbin:$ROOT/realbin")
-assert_contains 'mr create' "$(cat "$GLAB_LOG")" "25b. another contributor's fork MR on the same branch name does not stop this branch's MR"
+assert_contains 'mr create' "$(cat "$GLAB_LOG")" "25d. another contributor's fork MR on the same branch name does not stop this branch's MR"
+d="$ROOT/t25e"; new_repo "$d" --remote gitlab.com; git -C "$d" checkout -q -b feat
+echo x > "$d/a.txt"; : > "$GLAB_LOG"
+out=$(GLAB_PROJECT_ID=2 GLAB_MR_LIST='[{"iid":5,"state":"opened","project_id":1,"source_project_id":2}]' forge_ladder "$d" "$ROOT/glabbin:$ROOT/realbin")
+assert_contains 'pr:exists' "$out" "25e. working from my fork (glab resolves the parent): my open MR is recognised"
+assert_absent 'mr create' "$(cat "$GLAB_LOG")" "25e. no create GitLab would refuse"
 
 # 26. gitlab WITHOUT glab → MR requested through git push options (no CLI)  [forge case 2]
 d="$ROOT/t26"; new_repo "$d" --remote gitlab.com; git -C "$d" checkout -q -b feat
