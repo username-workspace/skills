@@ -1,374 +1,746 @@
 {
   "bare/multi-turn/green/green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 46,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/multi-turn/green/red-then-fixed": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 83,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/multi-turn/green/slow-green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 109,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/multi-turn/none/green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 4,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/multi-turn/none/red-then-fixed": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 4,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/multi-turn/none/slow-green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
-    "secs": 4,
-    "harness": "f782c83"
+    "secs": 5,
+    "harness": "3f514cc"
   },
   "bare/multi-turn/red-then-fixed/green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
-    "secs": 48,
-    "harness": "f782c83"
+    "secs": 50,
+    "harness": "3f514cc"
   },
   "bare/multi-turn/red-then-fixed/red-then-fixed": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
-    "secs": 83,
-    "harness": "f782c83"
+    "secs": 85,
+    "harness": "3f514cc"
   },
   "bare/multi-turn/red-then-fixed/slow-green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 109,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/multi-turn/timeout/green": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 8,
-    "harness": "f782c83"
-  },
-  "bare/multi-turn/timeout/red-then-fixed": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 9,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
-  "bare/multi-turn/timeout/slow-green": {
-    "run": "1905a1",
+  "bare/multi-turn/timeout/red-then-fixed": {
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 8,
-    "harness": "f782c83"
+    "harness": "3f514cc"
+  },
+  "bare/multi-turn/timeout/slow-green": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 9,
+    "harness": "3f514cc"
   },
   "bare/reedit/green/green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
-    "secs": 44,
-    "harness": "f782c83"
+    "secs": 47,
+    "harness": "3f514cc"
   },
   "bare/reedit/green/red-then-fixed": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
-    "secs": 81,
-    "harness": "f782c83"
+    "secs": 82,
+    "harness": "3f514cc"
   },
   "bare/reedit/green/slow-green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
-    "secs": 107,
-    "harness": "f782c83"
+    "secs": 106,
+    "harness": "3f514cc"
   },
   "bare/reedit/none/green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 3,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/reedit/none/red-then-fixed": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 3,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/reedit/none/slow-green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
-    "secs": 3,
-    "harness": "f782c83"
+    "secs": 4,
+    "harness": "3f514cc"
   },
   "bare/reedit/red-then-fixed/green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 44,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/reedit/red-then-fixed/red-then-fixed": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
-    "secs": 81,
-    "harness": "f782c83"
+    "secs": 80,
+    "harness": "3f514cc"
   },
   "bare/reedit/red-then-fixed/slow-green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
-    "secs": 107,
-    "harness": "f782c83"
+    "secs": 106,
+    "harness": "3f514cc"
   },
   "bare/reedit/timeout/green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 5,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/reedit/timeout/red-then-fixed": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 5,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/reedit/timeout/slow-green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 5,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/single-shot/green/green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 45,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/single-shot/green/red-then-fixed": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
-    "secs": 83,
-    "harness": "f782c83"
+    "secs": 81,
+    "harness": "3f514cc"
   },
   "bare/single-shot/green/slow-green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 107,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/single-shot/none/green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 3,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/single-shot/none/red-then-fixed": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 3,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/single-shot/none/slow-green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 3,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "bare/single-shot/red-then-fixed/green": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 45,
-    "harness": "f782c83"
-  },
-  "bare/single-shot/red-then-fixed/red-then-fixed": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 83,
-    "harness": "f782c83"
-  },
-  "bare/single-shot/red-then-fixed/slow-green": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 109,
-    "harness": "f782c83"
-  },
-  "bare/single-shot/timeout/green": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 5,
-    "harness": "f782c83"
-  },
-  "bare/single-shot/timeout/red-then-fixed": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 5,
-    "harness": "f782c83"
-  },
-  "bare/single-shot/timeout/slow-green": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 5,
-    "harness": "f782c83"
-  },
-  "explicit/bare/multi-turn/green/green": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 45,
-    "harness": "f782c83"
-  },
-  "explicit/bare/multi-turn/green/red-then-fixed": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 82,
-    "harness": "f782c83"
-  },
-  "explicit/bare/multi-turn/red-then-fixed/green": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 47,
-    "harness": "f782c83"
-  },
-  "explicit/bare/multi-turn/red-then-fixed/red-then-fixed": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 83,
-    "harness": "f782c83"
-  },
-  "explicit/bare/reedit/green/green": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 45,
-    "harness": "f782c83"
-  },
-  "explicit/bare/reedit/green/red-then-fixed": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 114,
-    "harness": "f782c83"
-  },
-  "explicit/bare/reedit/red-then-fixed/green": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 47,
-    "harness": "f782c83"
-  },
-  "explicit/bare/reedit/red-then-fixed/red-then-fixed": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 81,
-    "harness": "f782c83"
-  },
-  "explicit/bare/single-shot/green/green": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 45,
-    "harness": "f782c83"
-  },
-  "explicit/bare/single-shot/green/red-then-fixed": {
-    "run": "1905a1",
-    "proven": "2026-09-26",
-    "secs": 82,
-    "harness": "f782c83"
-  },
-  "explicit/bare/single-shot/red-then-fixed/green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 76,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
-  "explicit/bare/single-shot/red-then-fixed/red-then-fixed": {
-    "run": "1905a1",
+  "bare/single-shot/red-then-fixed/red-then-fixed": {
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 81,
-    "harness": "f782c83"
+    "harness": "3f514cc"
+  },
+  "bare/single-shot/red-then-fixed/slow-green": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 108,
+    "harness": "3f514cc"
+  },
+  "bare/single-shot/timeout/green": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 5,
+    "harness": "3f514cc"
+  },
+  "bare/single-shot/timeout/red-then-fixed": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 5,
+    "harness": "3f514cc"
+  },
+  "bare/single-shot/timeout/slow-green": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 6,
+    "harness": "3f514cc"
+  },
+  "explicit/bare/multi-turn/green/green": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 44,
+    "harness": "3f514cc"
+  },
+  "explicit/bare/multi-turn/green/red-then-fixed": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 80,
+    "harness": "3f514cc"
+  },
+  "explicit/bare/multi-turn/red-then-fixed/green": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 45,
+    "harness": "3f514cc"
+  },
+  "explicit/bare/multi-turn/red-then-fixed/red-then-fixed": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 81,
+    "harness": "3f514cc"
+  },
+  "explicit/bare/reedit/green/green": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 45,
+    "harness": "3f514cc"
+  },
+  "explicit/bare/reedit/green/red-then-fixed": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 80,
+    "harness": "3f514cc"
+  },
+  "explicit/bare/reedit/red-then-fixed/green": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 44,
+    "harness": "3f514cc"
+  },
+  "explicit/bare/reedit/red-then-fixed/red-then-fixed": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 82,
+    "harness": "3f514cc"
+  },
+  "explicit/bare/single-shot/green/green": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 44,
+    "harness": "3f514cc"
+  },
+  "explicit/bare/single-shot/green/red-then-fixed": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 80,
+    "harness": "3f514cc"
+  },
+  "explicit/bare/single-shot/red-then-fixed/green": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 44,
+    "harness": "3f514cc"
+  },
+  "explicit/bare/single-shot/red-then-fixed/red-then-fixed": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 113,
+    "harness": "3f514cc"
   },
   "explicit/node/single-shot/auto/green": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
-    "secs": 45,
-    "harness": "f782c83"
+    "secs": 47,
+    "harness": "3f514cc"
   },
-  "go/single-shot/auto/green": {
-    "run": "1905a1",
+  "gitlab/bare/multi-turn/green/green": {
+    "run": "195e3d",
     "proven": "2026-09-26",
-    "secs": 48,
-    "harness": "f782c83"
+    "secs": 24,
+    "harness": "3f514cc"
   },
-  "multi/single-shot/auto/red-then-fixed": {
-    "run": "1905a1",
+  "gitlab/bare/multi-turn/green/red-then-fixed": {
+    "run": "195e3d",
     "proven": "2026-09-26",
-    "secs": 83,
-    "harness": "f782c83"
+    "secs": 95,
+    "harness": "3f514cc"
   },
-  "node/single-shot/auto/green": {
-    "run": "1905a1",
+  "gitlab/bare/multi-turn/green/slow-green": {
+    "run": "195e3d",
     "proven": "2026-09-26",
-    "secs": 45,
-    "harness": "f782c83"
+    "secs": 87,
+    "harness": "3f514cc"
   },
-  "php/single-shot/auto/green": {
-    "run": "1905a1",
+  "gitlab/bare/multi-turn/none/green": {
+    "run": "195e3d",
     "proven": "2026-09-26",
-    "secs": 45,
-    "harness": "f782c83"
+    "secs": 3,
+    "harness": "3f514cc"
   },
-  "pnpm-ts/single-shot/auto/green": {
-    "run": "1905a1",
+  "gitlab/bare/multi-turn/none/red-then-fixed": {
+    "run": "195e3d",
     "proven": "2026-09-26",
-    "secs": 46,
-    "harness": "f782c83"
+    "secs": 3,
+    "harness": "3f514cc"
   },
-  "twist/amend-after-push": {
-    "run": "1905a1",
+  "gitlab/bare/multi-turn/none/slow-green": {
+    "run": "195e3d",
     "proven": "2026-09-26",
-    "secs": 17,
-    "harness": "f782c83"
+    "secs": 3,
+    "harness": "3f514cc"
   },
-  "twist/bg-writer": {
-    "run": "1905a1",
+  "gitlab/bare/multi-turn/red-then-fixed/green": {
+    "run": "195e3d",
     "proven": "2026-09-26",
-    "secs": 12,
-    "harness": "f782c83"
+    "secs": 53,
+    "harness": "3f514cc"
   },
-  "twist/manual-push-midflow": {
-    "run": "1905a1",
+  "gitlab/bare/multi-turn/red-then-fixed/red-then-fixed": {
+    "run": "195e3d",
     "proven": "2026-09-26",
-    "secs": 12,
-    "harness": "f782c83"
+    "secs": 96,
+    "harness": "3f514cc"
   },
-  "twist/mr-closed-mid-watch": {
-    "run": "1905a1",
+  "gitlab/bare/multi-turn/red-then-fixed/slow-green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 108,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/multi-turn/timeout/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 8,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/multi-turn/timeout/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 7,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/multi-turn/timeout/slow-green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 7,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/reedit/green/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 52,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/reedit/green/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 93,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/reedit/green/slow-green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 85,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/reedit/none/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 2,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/reedit/none/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 3,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/reedit/none/slow-green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 2,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/reedit/red-then-fixed/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 53,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/reedit/red-then-fixed/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 94,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/reedit/red-then-fixed/slow-green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 85,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/reedit/timeout/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 5,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/reedit/timeout/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 4,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/reedit/timeout/slow-green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 4,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/single-shot/green/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 43,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/single-shot/green/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 94,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/single-shot/green/slow-green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 85,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/single-shot/none/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 2,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/single-shot/none/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 2,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/single-shot/none/slow-green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 2,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/single-shot/red-then-fixed/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 52,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/single-shot/red-then-fixed/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 92,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/single-shot/red-then-fixed/slow-green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 86,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/single-shot/timeout/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 5,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/single-shot/timeout/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 4,
+    "harness": "3f514cc"
+  },
+  "gitlab/bare/single-shot/timeout/slow-green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 4,
+    "harness": "3f514cc"
+  },
+  "gitlab/explicit/bare/multi-turn/green/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 54,
+    "harness": "3f514cc"
+  },
+  "gitlab/explicit/bare/multi-turn/green/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 91,
+    "harness": "3f514cc"
+  },
+  "gitlab/explicit/bare/multi-turn/red-then-fixed/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 52,
+    "harness": "3f514cc"
+  },
+  "gitlab/explicit/bare/multi-turn/red-then-fixed/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 92,
+    "harness": "3f514cc"
+  },
+  "gitlab/explicit/bare/reedit/green/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 53,
+    "harness": "3f514cc"
+  },
+  "gitlab/explicit/bare/reedit/green/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 225,
+    "harness": "3f514cc"
+  },
+  "gitlab/explicit/bare/reedit/red-then-fixed/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 52,
+    "harness": "3f514cc"
+  },
+  "gitlab/explicit/bare/reedit/red-then-fixed/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 93,
+    "harness": "3f514cc"
+  },
+  "gitlab/explicit/bare/single-shot/green/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 51,
+    "harness": "3f514cc"
+  },
+  "gitlab/explicit/bare/single-shot/green/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 95,
+    "harness": "3f514cc"
+  },
+  "gitlab/explicit/bare/single-shot/red-then-fixed/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 52,
+    "harness": "3f514cc"
+  },
+  "gitlab/explicit/bare/single-shot/red-then-fixed/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 92,
+    "harness": "3f514cc"
+  },
+  "gitlab/explicit/node/single-shot/auto/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 53,
+    "harness": "3f514cc"
+  },
+  "gitlab/go/single-shot/auto/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 52,
+    "harness": "3f514cc"
+  },
+  "gitlab/multi/single-shot/auto/red-then-fixed": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 93,
+    "harness": "3f514cc"
+  },
+  "gitlab/node/single-shot/auto/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 52,
+    "harness": "3f514cc"
+  },
+  "gitlab/php/single-shot/auto/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 53,
+    "harness": "3f514cc"
+  },
+  "gitlab/pnpm-ts/single-shot/auto/green": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 52,
+    "harness": "3f514cc"
+  },
+  "gitlab/twist/amend-after-push": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 23,
+    "harness": "3f514cc"
+  },
+  "gitlab/twist/bg-writer": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 19,
+    "harness": "3f514cc"
+  },
+  "gitlab/twist/manual-push-midflow": {
+    "run": "195e3d",
     "proven": "2026-09-26",
     "secs": 16,
-    "harness": "f782c83"
+    "harness": "3f514cc"
+  },
+  "gitlab/twist/mr-closed-mid-watch": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 16,
+    "harness": "3f514cc"
+  },
+  "gitlab/twist/preexisting-dirty": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 2,
+    "harness": "3f514cc"
+  },
+  "gitlab/twist/review-loop": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 17,
+    "harness": "3f514cc"
+  },
+  "gitlab/twist/two-sessions": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 17,
+    "harness": "3f514cc"
+  },
+  "gitlab/twist/wip-branch": {
+    "run": "195e3d",
+    "proven": "2026-09-26",
+    "secs": 2,
+    "harness": "3f514cc"
+  },
+  "go/single-shot/auto/green": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 45,
+    "harness": "3f514cc"
+  },
+  "multi/single-shot/auto/red-then-fixed": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 82,
+    "harness": "3f514cc"
+  },
+  "node/single-shot/auto/green": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 45,
+    "harness": "3f514cc"
+  },
+  "php/single-shot/auto/green": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 46,
+    "harness": "3f514cc"
+  },
+  "pnpm-ts/single-shot/auto/green": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 48,
+    "harness": "3f514cc"
+  },
+  "twist/amend-after-push": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 19,
+    "harness": "3f514cc"
+  },
+  "twist/bg-writer": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 12,
+    "harness": "3f514cc"
+  },
+  "twist/manual-push-midflow": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 12,
+    "harness": "3f514cc"
+  },
+  "twist/mr-closed-mid-watch": {
+    "run": "1969ac",
+    "proven": "2026-09-26",
+    "secs": 12,
+    "harness": "3f514cc"
   },
   "twist/preexisting-dirty": {
-    "run": "191142",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 3,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "twist/review-loop": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
-    "secs": 13,
-    "harness": "f782c83"
+    "secs": 12,
+    "harness": "3f514cc"
   },
   "twist/two-sessions": {
-    "run": "1905a1",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 13,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   },
   "twist/wip-branch": {
-    "run": "191146",
+    "run": "1969ac",
     "proven": "2026-09-26",
     "secs": 3,
-    "harness": "f782c83"
+    "harness": "3f514cc"
   }
 }

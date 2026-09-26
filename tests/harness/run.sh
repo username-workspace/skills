@@ -411,7 +411,8 @@ exit 0
 EOF
 chmod +x "$ROOT/ghdup/gh"
 file_issue(){ PATH="$ROOT/ghdup:$PATH" python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import e2e
-e2e.file_issue(json.loads(sys.argv[2]), "s9", "boom")' "$dL/tests/e2e" "$1"; }
+e2e.FORGE = sys.argv[3]
+e2e.file_issue(json.loads(sys.argv[2]), "s9", "boom")' "$dL/tests/e2e" "$1" "${2:-github}"; }
 file_issue '{"twist": "wip-branch"}'
 assert_contains "issue comment 67" "$(cat "$GHDUP_LOG")" "16. a scenario already failing in an open issue gets a comment there"
 assert_absent "issue create" "$(cat "$GHDUP_LOG")" "16. never a duplicate issue for the same scenario"
@@ -420,5 +421,23 @@ assert_contains "issue create" "$(cat "$GHDUP_LOG")" "16. a new failing scenario
 : > "$GHDUP_LOG"; GHDUP_COMMENT_RC=1 file_issue '{"twist": "wip-branch"}'
 assert_contains "issue create" "$(cat "$GHDUP_LOG")" "16. a comment that fails still leaves a record (falls back to a new issue)"
 assert_absent "--search" "$(cat "$GHDUP_LOG")" "16. the open-issue lookup lists directly, never through the lagging search index"
+: > "$GHDUP_LOG"; file_issue '{"flow": "single-shot", "gate": "green", "ci": "green"}' gitlab
+assert_contains "e2e.py --forge gitlab --scenario single-shot:green:green" "$(cat "$GHDUP_LOG")" \
+  "16. a GitLab failure's issue carries a command that reproduces it on GitLab"
+mkdir -p "$ROOT/forgedown"
+for cli in gh glab; do printf '#!/usr/bin/env bash\necho "401 Unauthorized" >&2; exit 1\n' > "$ROOT/forgedown/$cli"; done
+chmod +x "$ROOT/forgedown/gh" "$ROOT/forgedown/glab"
+forge_listing(){ PATH="$ROOT/forgedown:$PATH" python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import e2e
+e2e.FORGE = sys.argv[2]
+try:
+    print("returned", getattr(e2e, sys.argv[3])())
+except RuntimeError:
+    print("raised")' "$dL/tests/e2e" "$1" "$2"; }
+for forge in github gitlab; do
+  for listing in open_prs branches; do
+    assert_eq "raised" "$(forge_listing $forge $listing)" \
+      "16. $forge $listing: a forge that cannot answer is an error, never an empty sandbox"
+  done
+done
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]
