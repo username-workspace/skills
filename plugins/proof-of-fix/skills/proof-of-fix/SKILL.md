@@ -39,15 +39,20 @@ fit; the discipline is the same.
 ## How it engages on its own
 
 - **UserPromptSubmit** — when the prompt looks like a bug report or fix request (en/fr), the protocol
-  is injected as context, **once per session per repo**. No repo in scope → silent.
-- **Stop** — when a recorded repro is still open and the work-state changed since the last attempt,
+  is injected as context, **once per session per repo**. No repo in scope → silent. Harness envelopes
+  that also arrive as prompts (task notifications, agent hand-backs, cross-session messages) never
+  nudge: their wording is model output, not the user asking for a fix.
+- **Stop** — when this session's recorded repro is still open and the work-state changed since the last attempt,
   the hook **re-runs the probe itself**: green → the repro is auto-proven and a one-line
   `systemMessage` says so; red → a `block` hands the failing output back to the session to keep
   fixing. One attempt per work-state, capped at 5 per repro — an unconverging fix ends the turn, it
   never loops the Stop hook.
 
-State lives in `.git/proof-of-fix.json` (never committed, one active repro per repo — the latest
-recorded wins). Opt a repo out with `{ "enabled": false }` in `.proof-of-fix.json`.
+State lives in `.git/proof-of-fix.json` (never committed), **owned by the session that recorded it**:
+one active repro per session — the latest it recorded wins. `record` / `check` / `status` / `clear`
+act on the calling session (`CLAUDE_CODE_SESSION_ID`, or `--session`), and a Stop hook only re-runs
+the stopping session's repro, so concurrent sessions in one checkout never block on each other's
+probe. Opt a repo out with `{ "enabled": false }` in `.proof-of-fix.json`.
 
 ## Manual / debug
 

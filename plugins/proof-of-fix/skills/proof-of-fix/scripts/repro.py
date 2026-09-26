@@ -4,21 +4,27 @@
 Deterministic plumbing for an evidence-first fix loop: `record` runs the reproduction command and
 accepts it only if it FAILS (a repro that passes proves nothing); `check` re-runs the exact same
 command and succeeds only when it is now green — so the probe that demonstrated the bug is the one
-that demonstrates the fix. State lives in .git (never committed). A UserPromptSubmit hook nudges the
-protocol into context when a prompt looks like a bug report (once per session per repo); a Stop hook
-re-runs an open repro itself when the work-state changed — auto-closing it on green, blocking once per
-work-state on red (capped, never an infinite Stop loop). Opt a repo out with enabled:false in
-.proof-of-fix.json.
+that demonstrates the fix. State lives in .git (never committed), owned by the session that recorded
+it — concurrent sessions in one checkout never see each other's repro. A UserPromptSubmit hook nudges
+the protocol into context when a human prompt looks like a bug report (once per session per repo); a
+Stop hook re-runs the session's open repro itself when the work-state changed — auto-closing it on
+green, blocking once per work-state on red (capped, never an infinite Stop loop). Opt a repo out with
+enabled:false in .proof-of-fix.json.
 """
 import argparse, json, os, re, subprocess, sys
+from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _kernel
-from _kernel import git_dir, repo_root, run, write_json
+from _kernel import git_dir, repo_root, run
 
 INTENT_RE = re.compile(
     r"\b(bugs?|broken|regressions?|r[ée]gressions?|crash(es|ed)?|plante|fix(e[rz]?|es|ed|ing)?|"
     r"corrige[rz]?|r[ée]pare[rz]?|fails?|failing|failure|[ée]choue|cass[ée]e?s?|"
     r"doesn'?t\s+work|ne\s+(marche|fonctionne)\s+(plus|pas))\b", re.I)
+
+ENVELOPE_RE = re.compile(
+    r"^\s*(?:Another Claude session sent a message:[^\n]*\n\s*)?"
+    r"<(?:task-notification|agent-message|cross-session-message)\b")
 
 NUDGE = ("[proof-of-fix] This prompt looks like a bug/fix request. Evidence-first protocol: "
          "(1) REPRODUCE before touching any code — write the smallest failing probe (a test or a "
@@ -52,12 +58,21 @@ def state_path(repo):
     return os.path.join(git_dir(repo), "proof-of-fix.json")
 
 
-def read_state(repo):
-    return _kernel.read_state(state_path(repo))
+def session_of(args):
+    return args.session or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
 
 
-def write_state(repo, data):
-    _kernel.write_state(state_path(repo), data)
+def read_repro(repo, sid):
+    return _kernel.read_sessions(state_path(repo))["sessions"].get(sid)
+
+
+def write_repro(repo, sid, entry):
+    st = _kernel.read_sessions(state_path(repo))
+    if entry is None:
+        st["sessions"].pop(sid, None)
+    else:
+        st["sessions"][sid] = entry
+    _kernel.write_sessions(state_path(repo), st)
 
 
 def run_probe(repo, cmd):
@@ -78,72 +93,69 @@ def cmd_record(args):
         print("[proof-of-fix] ✗ does not reproduce — the probe exited 0. A repro must FAIL before the "
               "fix, otherwise it proves nothing. Sharpen the probe (or the bug is already gone).")
         sys.exit(1)
-    write_state(repo, {"cmd": args.cmd, "recorded_rc": rc, "status": "open", "tail": tail,
-                       "nag": {}, "attempts": 0})
+    write_repro(repo, session_of(args), {"started": datetime.now(timezone.utc).isoformat(),
+                                         "cmd": args.cmd, "recorded_rc": rc, "status": "open",
+                                         "tail": tail, "nag": {}, "attempts": 0})
     print(f"[proof-of-fix] ✓ failing repro recorded (exit {rc}) — fix the root cause, then run check")
 
 
 def cmd_check(args):
-    repo = args.repo
-    st = read_state(repo)
+    repo, sid = args.repo, session_of(args)
+    st = read_repro(repo, sid)
     if not st or not st.get("cmd"):
         print("[proof-of-fix] no recorded repro — run record first")
         sys.exit(1)
     rc, tail = run_probe(repo, st["cmd"])
     if rc == 0:
         st["status"] = "proven"
-        write_state(repo, st)
+        write_repro(repo, sid, st)
         print("[proof-of-fix] ✓ fix proven — the recorded repro now passes")
         return
     st["tail"] = tail
-    write_state(repo, st)
+    write_repro(repo, sid, st)
     print(f"[proof-of-fix] ✗ still failing (exit {rc}) — the recorded repro does not pass yet:\n{tail}")
     sys.exit(1)
 
 
 def cmd_status(args):
-    print(json.dumps(read_state(args.repo) or {}, indent=2))
+    print(json.dumps(read_repro(args.repo, session_of(args)) or {}, indent=2))
 
 
 def cmd_clear(args):
-    try:
-        os.remove(state_path(args.repo))
-    except OSError:
-        pass
+    write_repro(args.repo, session_of(args), None)
     print("[proof-of-fix] cleared")
 
 
 def cmd_nudge(args):
-    """UserPromptSubmit policy: bug-shaped prompt → inject the protocol as context, once per session
-    per repo. The marker lives in .git, so a repo is required (where the probe will run anyway)."""
+    """UserPromptSubmit policy: a human bug-shaped prompt → inject the protocol as context, once per
+    session per repo. Harness envelopes (task notifications, agent hand-backs) also arrive as prompts;
+    their wording is model output, not the user's intent. The marker lives in .git, so a repo is
+    required (where the probe will run anyway)."""
     repo = args.repo
     if load_config(repo).get("enabled", True) is False:
         return
-    if not INTENT_RE.search(args.prompt or ""):
+    prompt = args.prompt or ""
+    if ENVELOPE_RE.match(prompt) or not INTENT_RE.search(prompt):
         return
     if not os.path.isdir(git_dir(repo)):
         return
     marker = os.path.join(git_dir(repo), "proof-of-fix-nudge.json")
-    try:
-        if json.load(open(marker)).get("session") == args.session:
-            return
-    except Exception:
-        pass
-    try:
-        write_json(marker, {"session": args.session})
-    except OSError:
+    st = _kernel.read_sessions(marker)
+    if args.session in st["sessions"]:
         return
+    st["sessions"][args.session] = {"started": datetime.now(timezone.utc).isoformat()}
+    _kernel.write_sessions(marker, st)
     ctx = NUDGE.format(script=os.path.abspath(__file__), repo=repo)
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
                                              "additionalContext": ctx}}))
 
 
 def cmd_hook(args):
-    """Stop policy: an open repro is re-run HERE when the work-state changed since the last attempt —
-    green → auto-proven (systemMessage); red → block once per work-state, capped at MAX_NAGS so an
-    unconverging fix ends the turn instead of looping the Stop hook."""
-    repo = args.repo
-    st = read_state(repo)
+    """Stop policy: this session's open repro is re-run HERE when the work-state changed since the
+    last attempt — green → auto-proven (systemMessage); red → block once per work-state, capped at
+    MAX_NAGS so an unconverging fix ends the turn instead of looping the Stop hook."""
+    repo, sid = args.repo, args.session
+    st = read_repro(repo, sid)
     if not st or st.get("status") != "open" or not st.get("cmd"):
         return
     if load_config(repo).get("enabled", True) is False:
@@ -159,12 +171,12 @@ def cmd_hook(args):
     rc, tail = run_probe(repo, st["cmd"])
     if rc == 0:
         st["status"] = "proven"
-        write_state(repo, st)
+        write_repro(repo, sid, st)
         print(json.dumps({"systemMessage": "[proof-of-fix] ✓ fix proven — the recorded repro now passes"}))
         return
     st["tail"] = tail
-    write_state(repo, st)
-    reason = (f"A failing reproduction is on record for this repo (`{st['cmd']}`) and it STILL fails "
+    write_repro(repo, sid, st)
+    reason = (f"A failing reproduction is on record for this session (`{st['cmd']}`) and it STILL fails "
               f"(exit {rc}) — the bug is not proven fixed. Fix the ROOT cause (no bypass, no weakened "
               f"probe), then run `python3 {os.path.abspath(__file__)} check --repo {repo}` and show the "
               f"green run. If the repro is obsolete or you deliberately chose not to fix it, say so and "
