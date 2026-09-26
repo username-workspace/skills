@@ -248,6 +248,9 @@ assert_eq "1 reviewing done none" "$(sg "$d")" "record --sha: a short sha is res
 out=$("$PY" "$RV" record --repo "$d" --score 95 --sha not-a-commit 2>&1); rc=$?
 assert_eq 1 "$rc" "record --sha: a value that names no commit is refused (exit 1)"
 assert_eq "1 reviewing done none" "$(sg "$d")" "record --sha: and the refused record is not written"
+printf '{"threshold":90}' > "$ROOT/mr-alt.json"; work "$d"
+assert_contains "--config $ROOT/mr-alt.json" "$("$PY" "$RV" stage --repo "$d" --need N1 --config "$ROOT/mr-alt.json")" \
+  "stage: asked under --config, the record step it names keeps the same config"
 
 # --- presence is not enablement: prepush_gate:false still stamps presence, flagged off ---------------
 d="$ROOT/presence"; mkrepo "$d"; git -C "$d" checkout -q -b feat

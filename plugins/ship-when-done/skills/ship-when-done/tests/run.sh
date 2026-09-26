@@ -805,6 +805,21 @@ python3 -c 'import sys, importlib.util as u
 sp = u.spec_from_file_location("ship", sys.argv[1]); m = u.module_from_spec(sp); sp.loader.exec_module(m)
 m.handoff(sys.argv[2], "mr-watchdog-session.json", "need/n1", "s1")' "$SHIP" "$d"
 assert_contains '"rc": 2' "$(cat "$d/.git/swd-handoff.json" 2>/dev/null)" "N. a sibling that refuses the handoff leaves evidence (version skew is diagnosable)"
+printf 'import sys\nsys.exit(0)\n' > "$ROOT/oldwatch.py"
+python3 -c 'import sys, importlib.util as u
+sp = u.spec_from_file_location("ship", sys.argv[1]); m = u.module_from_spec(sp); sp.loader.exec_module(m)
+m.handoff(sys.argv[2], "mr-watchdog-session.json", "need/n1", "s1")' "$SHIP" "$d"
+[ -f "$d/.git/swd-handoff.json" ] && ko "N. a later successful handoff clears the stale evidence" || ok "N. a later successful handoff clears the stale evidence"
+python3 "$SHIP" stage --repo "$d" --stage gating >/dev/null 2>&1; rc=$?
+assert_eq 2 "$rc" "N. stage without the need is refused: its steps would carry no need token"
+printf '{"gate":"true"}' > "$ROOT/swd-alt.json"; rm -f "$d/.git/ship-when-done.json"
+printf '{"gate":"false"}' > "$d/.git/ship-when-done.json"
+step=$(python3 "$SHIP" stage --repo "$d" --need N1 --stage gating --config "$ROOT/swd-alt.json" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["next"]["run"][2:]))')
+assert_contains "--config $ROOT/swd-alt.json" "$step" "N. a stage asked under --config names steps that run under it too"
+python3 "$SHIP" $step >/dev/null 2>&1
+assert_eq "1 done none " "$(python3 "$SHIP" stage --repo "$d" --need N1 --stage gating --config "$ROOT/swd-alt.json" \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["v"], d["state"], d["next"]["kind"], "")')" "N. and the step it named converges"
+printf '{"gate":"true"}' > "$d/.git/ship-when-done.json"
 printf '{"v":1,"sessions":{},"script":"x","prepush_gate":false}' > "$d/.git/merge-review-session.json"
 rm -f "$d/.git/merge-review-state.json"
 assert_contains '"pushed": true' "$(python3 "$SHIP" push --repo "$d" --need N1)" "N. merge-review present with prepush_gate off → no push hold"

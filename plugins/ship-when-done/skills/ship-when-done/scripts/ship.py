@@ -792,9 +792,12 @@ def handoff(repo, fname, branch, session):
                             "--branch", branch], capture_output=True, text=True, timeout=20)
     except Exception:
         return
+    evidence = os.path.join(git_dir(repo), "swd-handoff.json")
     if r.returncode != 0:
-        _kernel.write_state(os.path.join(git_dir(repo), "swd-handoff.json"),
-                            {"sibling": fname, "branch": branch, "rc": r.returncode, "stderr": r.stderr[-300:]})
+        _kernel.write_state(evidence, {"sibling": fname, "branch": branch, "rc": r.returncode,
+                                       "stderr": r.stderr[-300:]})
+    elif os.path.exists(evidence):
+        os.remove(evidence)
 
 
 def watchdog_handoff(repo, session):
@@ -1054,7 +1057,8 @@ def cmd_stage(args):
     if not cfg.get("enabled", True):
         print(json.dumps(stage_report(args.stage, "blocked", {"enabled": False})))
         return
-    me, n = ["python3", os.path.abspath(__file__)], ["--need", args.need, "--repo", repo]
+    me = ["python3", os.path.abspath(__file__)]
+    n = ["--need", args.need, "--repo", repo] + (["--config", args.config] if args.config else [])
     state = git_state(repo)
     if not state.get("is_git"):
         print(json.dumps(stage_report(args.stage, "blocked", {"refused": "not-a-git-repo"})))
@@ -1195,7 +1199,8 @@ def main():
     for name, fn in (("gate", cmd_gate), ("commit", cmd_commit), ("push", cmd_push), ("open-pr", cmd_open_pr),
                      ("mark-ready", cmd_mark_ready), ("clear-done", cmd_clear_done), ("stage", cmd_stage)):
         o = sub.add_parser(name)
-        o.add_argument("--repo", default="."); o.add_argument("--config"); o.add_argument("--need", default="")
+        o.add_argument("--repo", default="."); o.add_argument("--config")
+        o.add_argument("--need", required=name == "stage", default="")
         o.add_argument("--summary", default="work"); o.add_argument("--type", default="chore")
         o.set_defaults(fn=fn)
         if name == "stage":

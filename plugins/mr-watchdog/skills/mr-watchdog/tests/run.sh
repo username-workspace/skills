@@ -438,6 +438,9 @@ printf '{"poll_interval":1,"watch_timeout":0}' > "$d/.mr-watchdog.json"
 STUB_CI=pending python3 "$WATCH" run --need N1 --repo "$d" >/dev/null 2>&1
 assert_eq "1 ci pending background run --need" "$(sg "$d")" "16. stopped on the watch timeout → watched again"
 printf '{"poll_interval":1}' > "$d/.mr-watchdog.json"
+printf '{"poll_interval":1}' > "$ROOT/wd-alt.json"
+assert_contains "\"--config\", \"$ROOT/wd-alt.json\"" "$(python3 "$WATCH" stage --repo "$d" --need N1 --config "$ROOT/wd-alt.json")" \
+  "16. a stage asked under --config names a watcher that runs under it too"
 python3 "$WATCH" handoff --repo "$d" --session S9 --branch feat
 assert_eq yes "$(env -u HARNESS_AUTO_ENGAGE python3 "$WATCH" engaged --repo "$d" --session S9)" \
   "16. handoff engages the branch through mr-watchdog's own CLI"

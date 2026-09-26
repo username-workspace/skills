@@ -201,7 +201,8 @@ def cmd_stage(args):
         return
     thr = int(cfg.get("threshold", 80))
     rec, head = read_state(repo) or {}, head_sha(repo)
-    record = (shlex.join(["python3", os.path.abspath(__file__), "record", "--repo", repo, "--sha", head])
+    record = (shlex.join(["python3", os.path.abspath(__file__), "record", "--repo", repo, "--sha", head]
+                         + (["--config", args.config] if args.config else []))
               + " --score <N> --findings '<JSON list of the findings still open>'")
     evidence = {"sha": head, "score": rec.get("score"), "threshold": thr, "file": state_path(repo)}
     if rec.get("head") == head and isinstance(rec.get("score"), int) and rec["score"] >= thr:
