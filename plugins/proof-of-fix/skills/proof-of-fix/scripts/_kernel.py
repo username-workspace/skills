@@ -194,12 +194,27 @@ def write_state(path, data):
         pass
 
 
-def auto_engage():
+def _under(path, roots):
+    p = os.path.realpath(path)
+    return any(p == r or p.startswith(r.rstrip(os.sep) + os.sep) for r in roots)
+
+
+def auto_engage(repo):
     """Engagement mode switch. Default (explicit): plugins act only on explicit protocol artifacts —
     the done-marker, ship's handoff stamp. HARNESS_AUTO_ENGAGE=1 restores inferred engagement
-    (baseline deltas, provenance ∩ branch content, upstream advance). Truthy allowlist: the truthy
-    side takes autonomous actions, so an unrecognized value must mean OFF."""
-    return os.environ.get("HARNESS_AUTO_ENGAGE", "").lower() in ("1", "true")
+    (baseline deltas, provenance ∩ branch content, upstream advance), scoped: a session launched
+    outside a git work tree (CLAUDE_PROJECT_DIR, e.g. $HOME) has no project to infer from, and a
+    launch dir or repo under a path of HARNESS_AUTO_ENGAGE_EXCLUDE (os.pathsep-separated — repos that
+    carry their own delivery harness) stays explicit. Truthy allowlist: the truthy side takes
+    autonomous actions, so an unrecognized value must mean OFF."""
+    if os.environ.get("HARNESS_AUTO_ENGAGE", "").lower() not in ("1", "true"):
+        return False
+    excluded = [os.path.realpath(os.path.expanduser(p))
+                for p in os.environ.get("HARNESS_AUTO_ENGAGE_EXCLUDE", "").split(os.pathsep) if p.strip()]
+    launch = os.environ.get("CLAUDE_PROJECT_DIR")
+    if launch and (not git_toplevel(launch) or _under(launch, excluded)):
+        return False
+    return not _under(repo, excluded)
 
 
 def marker_path(repo):

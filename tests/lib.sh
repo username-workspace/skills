@@ -2,6 +2,7 @@
 #   . "$(cd "$(dirname "$0")" && git rev-parse --show-toplevel)/tests/lib.sh"
 # Suite-specific asserts (assert_nonzero, assert_before, …) stay in their suite.
 PASS=0; FAIL=0
+unset CLAUDE_PROJECT_DIR HARNESS_AUTO_ENGAGE_EXCLUDE   # a gate run inside a Claude session inherits its launch scope
 ok(){ PASS=$((PASS+1)); printf '  \033[32m✓\033[0m %s\n' "$1"; }
 ko(){ FAIL=$((FAIL+1)); printf '  \033[31m✗ %s\033[0m\n' "$1"; }
 assert_contains(){ case "$2" in *"$1"*) ok "$3";; *) ko "$3 — expected to contain [$1] in [$2]";; esac; }

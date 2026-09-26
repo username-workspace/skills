@@ -186,6 +186,17 @@ Engagement is **inferred** from observed session work: HEAD or the tree advanced
 baseline, or the branch carries paths this session observably edited (PostToolUse provenance), or the
 branch's upstream advanced. This is the previous (pre-2.0) behaviour, preserved verbatim.
 
+Auto is **scoped** — outside the scope a plugin falls back to explicit (a declaration still works):
+
+- a session launched outside a git work tree (`CLAUDE_PROJECT_DIR`, e.g. `$HOME`) has no project to
+  infer from — it may touch many repos, none of which it was started for;
+- `HARNESS_AUTO_ENGAGE_EXCLUDE` (paths separated by `os.pathsep`) lists trees that carry their own
+  delivery harness: a repo under one, or a session launched under one, stays explicit.
+
+This makes auto a safe user-wide default: set both variables once in `~/.claude/settings.json`
+(`env`) and every new side project engages on its own, while the excluded trees and ad-hoc sessions
+do not.
+
 > The failure direction is **fail-closed**: an unrecognised `HARNESS_AUTO_ENGAGE` value, a missing
 > baseline, or a corrupt state file all resolve to *not engaged*. The harness never acts on a branch
 > it is unsure about.

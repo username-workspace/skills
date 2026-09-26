@@ -29,7 +29,8 @@ It registers a **`Stop` hook** (end of an agent turn — `hooks/hooks.json` → 
 - **Auto (`HARNESS_AUTO_ENGAGE=1` in the environment)** — it engages itself: it acts when **THIS
   session produced the work** (HEAD or tree advanced since the turn-start baseline, or the branch
   carries paths this session observably edited), so it never sweeps up a pre-existing dirty tree or
-  a repo you're just visiting.
+  a repo you're just visiting. Auto is scoped: a session launched outside a git repo (e.g. `$HOME`)
+  or under a path of `HARNESS_AUTO_ENGAGE_EXCLUDE` (`:`-separated) stays explicit.
 
 Opt a repo **out** entirely with `{ "enabled": false }` in `.ship-when-done.json`. When engaged, it
 still acts only if there is work in flight (uncommitted changes or unshipped commits).

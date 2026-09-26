@@ -239,7 +239,7 @@ def engaged(repo, cfg, session):
         return False
     if entry.get("engaged"):
         return True
-    if not auto_engage():
+    if not auto_engage(repo):
         return False
     if upstream_sha(repo) != (entry.get("base") or ""):
         entry["engaged"] = True
