@@ -538,15 +538,16 @@ def file_issue(sc, tag, err):
             f"**Reproduce**: `python3 tests/e2e/e2e.py --scenario {repro}`"
             f"\n\n```\n{str(err)[-4000:]}\n```")
     prefix = f"e2e: persistent failure — {what} ("
-    _, out, _ = sh(["gh", "issue", "list", "--repo", ISSUE_REPO, "--state", "open", "--search",
-                    f'"{what}" in:title', "--json", "number,title"])
+    _, out, _ = sh(["gh", "issue", "list", "--repo", ISSUE_REPO, "--state", "open", "--limit", "200",
+                    "--json", "number,title"])
     try:
         open_issue = next((i["number"] for i in json.loads(out or "[]") if i["title"].startswith(prefix)), None)
     except Exception:
         open_issue = None
     if open_issue:
-        sh(["gh", "issue", "comment", str(open_issue), "--repo", ISSUE_REPO, "--body", body])
-        return
+        rc, _, _ = sh(["gh", "issue", "comment", str(open_issue), "--repo", ISSUE_REPO, "--body", body])
+        if rc == 0:
+            return
     rc, _, _ = sh(["gh", "issue", "create", "--repo", ISSUE_REPO, "--title", title, "--body", body,
                    "--label", "e2e"])
     if rc != 0:

@@ -362,7 +362,7 @@ fill_labels(){ python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import e
 print(" ".join(sorted(e2e.scenario_label(sc) for sc in e2e.stale_scenarios())))' "$dL/tests/e2e"; }
 all=$(fill_labels)
 for space in 'bare/' 'twist/' 'explicit/' 'multi/'; do
-  assert_contains "$space" "$all" "16. an empty ledger → --fill proves the ${space%/} situations too"
+  assert_contains " $space" " $all" "16. an empty ledger → --fill proves the ${space%/} situations too"
 done
 python3 - "$dL/tests/e2e" <<'PY'
 import json, sys; sys.path.insert(0, sys.argv[1]); import e2e
@@ -379,16 +379,19 @@ cat > "$ROOT/ghdup/gh" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$GHDUP_LOG"
 [ "$1 $2" = "issue list" ] && echo '[{"number":67,"title":"e2e: persistent failure — twist/wip-branch (seed tag s1)"}]'
+[ "$1 $2" = "issue comment" ] && exit "${GHDUP_COMMENT_RC:-0}"
 exit 0
 EOF
 chmod +x "$ROOT/ghdup/gh"
 file_issue(){ PATH="$ROOT/ghdup:$PATH" python3 -c 'import json, sys; sys.path.insert(0, sys.argv[1]); import e2e
 e2e.file_issue(json.loads(sys.argv[2]), "s9", "boom")' "$dL/tests/e2e" "$1"; }
-cp "$REPO_ROOT/tests/e2e/e2e.py" "$dL/tests/e2e/"
 file_issue '{"twist": "wip-branch"}'
 assert_contains "issue comment 67" "$(cat "$GHDUP_LOG")" "16. a scenario already failing in an open issue gets a comment there"
 assert_absent "issue create" "$(cat "$GHDUP_LOG")" "16. never a duplicate issue for the same scenario"
 : > "$GHDUP_LOG"; file_issue '{"twist": "preexisting-dirty"}'
 assert_contains "issue create" "$(cat "$GHDUP_LOG")" "16. a new failing scenario still files its own issue"
+: > "$GHDUP_LOG"; GHDUP_COMMENT_RC=1 file_issue '{"twist": "wip-branch"}'
+assert_contains "issue create" "$(cat "$GHDUP_LOG")" "16. a comment that fails still leaves a record (falls back to a new issue)"
+assert_absent "--search" "$(cat "$GHDUP_LOG")" "16. the open-issue lookup lists directly, never through the lagging search index"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]
