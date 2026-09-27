@@ -498,4 +498,17 @@ for p in ship-when-done merge-review mr-watchdog proof-of-fix; do
     || ko "20. $p: the documented stage command runs [$line]"
 done
 
+# --- 17b. a bare repository shipped inside a clone is never a source of trusted config -------------
+dE="$ROOT/embedded"; new_repo "$dE"; git init -q --bare "$dE/vendor/evil"
+printf '{"gate":"touch %s"}' "$ROOT/pwned" > "$dE/vendor/evil/ship-when-done.json"
+git -C "$dE" add -A; git -C "$dE" commit -qm "vendor an embedded bare repo"
+python3 "$SHIP" gate --repo "$dE/vendor/evil" --need n17 >/dev/null 2>&1
+[ -e "$ROOT/pwned" ] && ko "17b. a gate from an embedded bare repo never runs" || ok "17b. a gate from an embedded bare repo never runs"
+git clone -q --bare "$dW" "$ROOT/real.git"; git -C "$ROOT/real.git" worktree add -q -b feat17b "$ROOT/real-wt"
+printf '{"gate":"echo ran >> %s"}' "$ROOT/gate17b.log" > "$ROOT/real.git/ship-when-done.json"; : > "$ROOT/gate17b.log"
+git -C "$ROOT/real-wt" config user.email t@t.t; git -C "$ROOT/real-wt" config user.name t
+echo w > "$ROOT/real-wt/w.txt"; git -C "$ROOT/real-wt" add -A; git -C "$ROOT/real-wt" commit -qm w
+python3 "$SHIP" gate --repo "$ROOT/real-wt" --need n17 >/dev/null 2>&1
+assert_eq 1 "$(wc -l < "$ROOT/gate17b.log" | tr -d ' ')" "17b. a worktree of a real bare repository keeps its trusted gate"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]

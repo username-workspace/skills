@@ -27,7 +27,7 @@ def run(cmd, cwd, check=False, raw=False, timeout=None):
 
 
 def _rev_parse_dir(repo, flag):
-    rc, gd, _ = run(["git", "rev-parse", flag], repo)
+    rc, gd, _ = run(["git", "-c", "safe.bareRepository=explicit", "rev-parse", flag], repo)
     gd = gd if (rc == 0 and gd) else ".git"
     return gd if os.path.isabs(gd) else os.path.join(repo, gd)
 
