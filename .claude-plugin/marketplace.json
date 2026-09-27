@@ -65,7 +65,7 @@
     },
     {
       "name": "ship-when-done",
-      "version": "2.3.0",
+      "version": "2.3.1",
       "source": "./plugins/ship-when-done",
       "description": "A Stop-hook harness that commits at each milestone (the commit is the anti-loss), pushes the feature branch, and opens a draft PR/MR once the work is provably done — the goal's checklist satisfied AND the project's quality gate actually green. If a sibling merge-review gate is active, it HOLDS the push until that review passes the current HEAD — the quality gate runs before anything reaches the remote — and continues your session to run it. Forge-agnostic (GitHub/GitLab/Bitbucket): uses gh/glab if present, else GitLab push options, else surfaces the PR-creation URL — no CLI dependency. Branch-first, never commits or pushes the default branch, never merges, no AI attribution. Explicit by default: it acts only on a declared done-marker (mark-done); HARNESS_AUTO_ENGAGE=1 lets it engage on its own on work this session produced (never a pre-existing dirty tree). Opt out per repo.",
       "category": "development",
@@ -73,7 +73,7 @@
     },
     {
       "name": "mr-watchdog",
-      "version": "3.3.1",
+      "version": "3.3.2",
       "source": "./plugins/mr-watchdog",
       "description": "Triggered by an open merge request, mr-watchdog watches the MR's remote CI as a background task your MAIN session owns: the watcher is launched with run_in_background and tracked by the harness, which re-invokes your session the moment the pipeline resolves — so the verdict reaches you IN the conversation (no detached daemon, no status file, no polling). Strictly read-only — never commits, pushes, or merges. Green → 'ok, all good'; red → it hands back the failing job log so your session fixes the ROOT cause (no bypass), with a verify command to self-check the fix for fake-green (deleted/weakened tests, --no-verify, || true, lowered thresholds). A Stop hook nudges the session to launch the watcher, once per pipeline HEAD — and when the pipeline is already green for the exact HEAD at the Stop, hands the verdict over instead of staying silent. Engaged by ship-when-done's handoff by default; HARNESS_AUTO_ENGAGE=1 lets it also engage on its own for a branch this session pushed (never a stale or someone else's MR). Opt out per repo. Forge-agnostic (GitHub via gh, GitLab via glab). The CI-watch step after ship-when-done → merge-review.",
       "category": "development",
