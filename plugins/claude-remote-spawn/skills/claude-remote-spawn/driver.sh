@@ -363,9 +363,8 @@ case "$cmd" in
     pgid="$(spawn_get "$name" pgid)"
     if [ -n "$pgid" ]; then
       recorded="$(spawn_get "$name" leader_start)"
-      if [ -n "$recorded" ] && [ "$(leader_start "$pgid")" = "$recorded" ]; then
-        kill $(group_tree "$pgid") 2>/dev/null || true
-      elif [ -z "$recorded" ] && ps -o command= -p "$pgid" 2>/dev/null | grep -q "claude-remote-spawn"; then
+      if { [ -n "$recorded" ] && [ "$(leader_start "$pgid")" = "$recorded" ]; } ||
+         { [ -z "$recorded" ] && ps -o command= -p "$pgid" 2>/dev/null | grep -q "claude-remote-spawn"; }; then
         kill $(group_tree "$pgid") 2>/dev/null || true
       fi
     else
