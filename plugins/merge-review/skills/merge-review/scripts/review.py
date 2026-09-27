@@ -413,7 +413,7 @@ def cmd_context(args):
     diff_range = f"{ref}...HEAD"
     rc, current_base, _ = run(["git", "merge-base", ref, "HEAD"], repo)
     current_base = current_base if rc == 0 else None
-    if (current_base and prior.get("head") not in (None, head_sha(repo))
+    if (current_base and prior.get("passed") and prior.get("head") not in (None, head_sha(repo))
             and branch and prior.get("branch") == branch and prior.get("base") == current_base
             and run(["git", "merge-base", "--is-ancestor", prior["head"], "HEAD"], repo)[0] == 0):
         diff_range = f"{prior['head']}..HEAD"   # the OBLIGATION shrinks to the delta; the gate

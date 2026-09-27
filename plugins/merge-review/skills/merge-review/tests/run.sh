@@ -155,7 +155,7 @@ inc="$ROOT/inc"; mkrepo "$inc"; git -C "$inc" checkout -q -b feat
 "$PY" "$RV" baseline --repo "$inc" --session s1
 work "$inc"
 reviewed_range(){ env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$1" | "$PY" -c 'import json,sys; c=json.load(sys.stdin); print("--sha", c["head_sha"], "--base", c["base_sha"])'; }
-record_packet(){ "$PY" "$RV" record --repo "$1" --session s1 --score "$3" --passed $2 >/dev/null; }
+record_packet(){ "$PY" "$RV" record --repo "$1" --session s1 --score "$3" $2 >/dev/null; }
 record_packet "$inc" "$(reviewed_range "$inc")" 90
 h1=$(git -C "$inc" rev-parse HEAD)
 echo more > "$inc/more.txt"; git -C "$inc" add -A; git -C "$inc" commit -qm more
@@ -214,9 +214,9 @@ assert_eq 1 "$rc" "record: a base that is not the packet's full sha is refused"
 assert_eq 1 "$rc" "record: a base without the packet's head is refused"
 "$PY" "$RV" record --repo "$refb" --session s1 --score 90 --passed --sha "$(git -C "$refb" rev-parse main)" --base "$(git -C "$refb" rev-parse HEAD)" >/dev/null 2>&1; rc=$?
 assert_eq 1 "$rc" "record: a base that is not an ancestor of the head is refused"
-fx="$ROOT/inc-fix"; mkrepo "$fx"; git -C "$fx" checkout -q -b feat; work "$fx"; failed_head=$(git -C "$fx" rev-parse HEAD)
+fx="$ROOT/inc-fix"; mkrepo "$fx"; git -C "$fx" checkout -q -b feat; work "$fx"
 record_packet "$fx" "$(reviewed_range "$fx")" 40; work "$fx"
-assert_eq "git diff $failed_head..HEAD" "$(obligation_cmd "$fx")" "incremental: a confirmation after a failing pass reviews the fix delta"
+assert_eq "git diff origin/main...HEAD" "$(obligation_cmd "$fx")" "incremental: a failing pass approves nothing, so the next review is full"
 cfx="$ROOT/inc-fix-revert"; mkrepo "$cfx"; printf 'A=1\nSECRET=1\n' > "$cfx/config.env"; git -C "$cfx" add -A; git -C "$cfx" commit -qm "main: oops"; git -C "$cfx" push -q origin main 2>/dev/null
 git -C "$cfx" checkout -q -b feat; echo B=2 >> "$cfx/config.env"; git -C "$cfx" commit -qam "feat: B"; record_packet "$cfx" "$(reviewed_range "$cfx")" 40
 git -C "$cfx" checkout -q main; git -C "$cfx" revert --no-edit HEAD >/dev/null; git -C "$cfx" push -q origin main 2>/dev/null; git -C "$cfx" checkout -q feat
