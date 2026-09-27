@@ -51,7 +51,7 @@ python3 "${SKILL}" context --repo . --packet   # → context + materialized diff
 python3 "${SKILL}" prior   --repo .            # → the previous pass's state (score + findings) for §2bis
 ```
 
-The `diff_cmd` (and the packet's `diff`) may be an **incremental delta**: when a previous pass PASSED at a head that is an ancestor of HEAD, only the new commits need review. Only the *obligation* shrinks — the gate still requires a fresh record at the current HEAD.
+The `diff_cmd` (and the packet's `diff`) is taken against the merge target as last fetched (`<remote>/<default>` when it exists); the packet names the range it covers, `head_sha` and `base_sha`. Record every pass with `--sha <head_sha> --base <base_sha>` from the packet the reviewer saw. The next obligation is then an **incremental delta** (only the commits since that head) when that pass PASSED and was recorded on this branch, its base is exactly the current base, and its head is an ancestor of HEAD; a rebase or merge of the target, a rewritten or reverted base, another branch, or a pass recorded without the packet's range means the full diff. Only the *obligation* shrinks: the gate still requires a fresh record at the current HEAD.
 
 **Fresh-eyes review for the first pass.** The context that wrote a diff scores it too gently; the first review of a diff runs in a clean-context subagent:
 
@@ -61,7 +61,7 @@ The `diff_cmd` (and the packet's `diff`) may be an **incremental delta**: when a
 
 **Proportionate passes.** The first fresh-eyes pass is where defects are found; confirmations mostly confirm. So after it:
 
-- **Confirmation after fixes**: a fresh-context subagent again, but scoped. Its prompt carries the previous pass's findings verbatim (including any this session withdrew) and the fix delta `git diff <reviewed head>..HEAD`, where the reviewed head is the one `prior` shows for the failing pass (record that pass before committing the fix). It re-derives each prior finding against the code and looks for new defects in the fix delta only, and does not run the project's test suite (the project's quality gate and CI own that). Its output keeps "Since Last Pass" with a `file:line` for every resolved or withdrawn finding, a one-line pre-screening per changed function, and the `merge-review-state` block; it drops What's Good, Suggestions and Score Breakdown.
+- **Confirmation after fixes**: a fresh-context subagent again, but scoped. Its prompt carries the previous pass's findings verbatim (including any this session withdrew) and the packet `context` returns (the full diff: a failing pass approves nothing). It looks for new defects in the fix, `git diff <head of the failing pass>..HEAD` (`prior` shows that head, so record the failing pass before committing the fix), and re-derives each prior finding against the whole packet. It does not run the project's test suite (the project's quality gate and CI own that). Its output keeps "Since Last Pass" with a `file:line` for every resolved or withdrawn finding, a one-line pre-screening per changed function, and the `merge-review-state` block; it drops What's Good, Suggestions and Score Breakdown.
 - **Docs follow-ups**: a delta after an approval that touches only documentation is reviewed inline by this session with the §1–§4 rubric on the delta; tests and production code go to a subagent (`verify` only sees uncommitted changes, so it cannot guard a committed test delta).
 - **Breaker**: at most **two** confirmation passes after each first pass. If the second still lands below the threshold, STOP: surface the open findings and their evidence to the user, never start a third pass.
 
@@ -208,7 +208,7 @@ When `auto_fix` is on and the score is below threshold, **drive the diff to read
 **The loop:**
 1. Apply the attested fixes (minimal, root-cause — no band-aids; match the project's patterns, naming and commit convention; no AI attribution).
 2. Run `python3 "${SKILL}" verify --repo .` — the fake-green guard. It must pass before you commit (never disable/delete/weaken a test, no `--no-verify`, `|| true`, lowered thresholds). If verify fails, your "fix" is hiding the finding — redo it properly.
-3. Commit the fix, then **review it with a confirmation pass** (§0a: the fix delta since the reviewed head) and `python3 "${SKILL}" record --repo . --score <N> --passed` (drop `--passed` if still below threshold): this records the pass and, at threshold, clears the pre-push gate.
+3. Commit the fix, then **review it with a confirmation pass** (§0a: the packet `context` returns) and `python3 "${SKILL}" record --repo . --score <N> --passed --sha <head_sha> --base <base_sha>` (the range of the packet reviewed; drop `--passed` if still below threshold): this records the pass and, at threshold, clears the pre-push gate.
 4. Repeat until the score is **≥ threshold**, only **contestable** findings remain, or the breaker (two confirmation passes, §0a) trips.
 5. If only contestable findings remain below threshold, the breaker tripped, or the only way to pass is a workaround → **STOP**. Surface the remaining findings and the evidence; do not bypass, do not force-pass. The user decides.
 
