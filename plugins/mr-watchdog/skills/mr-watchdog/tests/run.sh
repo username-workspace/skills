@@ -14,7 +14,8 @@ cat > "$ROOT/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 ci="${STUB_CI:-pending}"
 case "$1 $2" in
-  "pr view")   echo "{\"state\":\"${STUB_MR_STATE:-OPEN}\"}";;
+  "pr view")   if [ -n "${STUB_MR_ERR:-}" ]; then echo "$STUB_MR_ERR" >&2; exit 1; fi
+               echo "{\"state\":\"${STUB_MR_STATE:-OPEN}\"}";;
   "pr checks") case "$ci" in success) echo '[{"bucket":"pass"}]';; failed) echo '[{"bucket":"fail"}]';; pending) echo '[{"bucket":"pending"}]';; none) echo '[]';; esac;;
   api*check-runs*) echo "$2" >> "${GH_API_LOG:-/dev/null}"
      case "$ci" in
@@ -36,7 +37,8 @@ cat > "$ROOT/bin/glab" <<'EOF'
 #!/usr/bin/env bash
 ci="${STUB_CI:-pending}"
 case "$1 $2" in
-  "mr list")   echo "[{\"iid\":4,\"state\":\"${STUB_MR_STATE_GL:-opened}\"}]";;
+  "mr list")   if [ -n "${STUB_MR_ERR:-}" ]; then echo "$STUB_MR_ERR" >&2; exit 1; fi
+               echo "[{\"iid\":4,\"state\":\"${STUB_MR_STATE_GL:-opened}\"}]";;
   "ci status") if [ "$ci" = none ]; then echo "No pipeline found for branch x"; exit 1; fi
                printf 'https://gitlab.com/t/r/-/pipelines/1\nSHA: x\nPipeline state: %s\n' "$ci";;
   "ci trace")  echo "INTERACTIVE-PICKER"; exit 1;;
@@ -118,6 +120,13 @@ for forge in ("github","gitlab"):
         ck(watch.ci_status(R, forge, "feat")==want, f"ci_status {forge}:{want}")
 ck(watch.mr_open(R,"github","feat") is True, "mr_open github OPEN")
 os.environ["STUB_MR_STATE"]="MERGED"; ck(watch.mr_open(R,"github","feat") is False, "mr_open github not-open")
+os.environ["STUB_MR_STATE"]="OPEN"
+os.environ["STUB_MR_ERR"]='no pull requests found for branch "feat"'
+ck(watch.mr_open(R,"github","feat") is False, "mr_open github: no pull request is not open")
+os.environ["STUB_MR_ERR"]="HTTP 502: Bad Gateway"
+ck(watch.mr_open(R,"github","feat") is None, "mr_open github: a forge error is unknown, never closed")
+ck(watch.mr_open(R,"gitlab","feat") is None, "mr_open gitlab: a forge error is unknown, never closed")
+del os.environ["STUB_MR_ERR"]
 PY
 new_repo "$ROOT/t2repo" gitlab.com
 while IFS= read -r l; do case "$l" in PASS*) ok "${l#PASS }";; FAIL*) ko "${l#FAIL }";; esac; done < <(python3 "$ROOT/t2.py" "$SCRIPTS" "$ROOT/t2repo")
@@ -285,6 +294,23 @@ assert_contains 'CI red' "$out" "7. on_red=notify → passive red report"
 assert_eq 1 "$rc" "7. on_red=notify → still exit 1"
 printf '{}' > "$d/.mr-watchdog.json"
 
+# 7a. a forge error on the MR lookup is not a closed MR: the watcher keeps watching and delivers the verdict
+d="$ROOT/mrblip"; new_repo "$d"
+printf '{"poll_interval":1}' > "$d/.mr-watchdog.json"
+mkdir -p "$ROOT/blipbin"
+cat > "$ROOT/blipbin/gh" <<BLIPGH
+#!/usr/bin/env bash
+case "\$1 \$2" in
+  "pr view") if [ -f "$ROOT/blip-done" ]; then echo '{"state":"OPEN"}'; else touch "$ROOT/blip-done"; echo "HTTP 502: Bad Gateway" >&2; exit 1; fi;;
+  api*check-runs*) echo '{"check_runs":[{"status":"completed","conclusion":"success"}]}';;
+  *) exit 0;;
+esac
+BLIPGH
+chmod +x "$ROOT/blipbin/gh"
+out=$(env PATH="$ROOT/blipbin:$PATH" python3 "$WATCH" run --repo "$d" 2>&1); rc=$?
+assert_absent 'no open merge request' "$out" "7a. a transient forge error never reads as a closed MR"
+assert_contains 'ok, all good' "$out" "7a. the watcher delivers the CI verdict after the blip"
+assert_eq 0 "$rc" "7a. green after the blip → exit 0"
 # 7b. the verdict is bound to the WATCHED SHA — a stale branch-level red (previous run, fresh push)
 # must never produce a red verdict while this sha has no registered checks yet
 d="$ROOT/flip"; new_repo "$d"
