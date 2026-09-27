@@ -61,9 +61,9 @@ The `diff_cmd` (and the packet's `diff`) may be an **incremental delta**: when a
 
 **Proportionate passes.** The first fresh-eyes pass is where defects are found; confirmations mostly confirm. So after it:
 
-- **Confirmation after fixes**: a fresh-context subagent again, but scoped: its prompt carries the prior findings and the new obligation `context` returns (the delta since the reviewed head), it rules on each prior finding and looks for new defects in that delta only, it does not re-run the project's gate (this session did, CI will), and it returns findings plus the `merge-review-state` block, none of the narrative sections.
-- **Small follow-ups**: a delta after an approval that touches only tests or docs, or a few lines, is reviewed inline by this session with the §1–§4 rubric on the delta; no subagent.
-- **Breaker**: at most **two** confirmation passes per branch after the first review. If the second still lands below the threshold, STOP: surface the open findings and their evidence to the user, never start a third pass.
+- **Confirmation after fixes**: a fresh-context subagent again, but scoped. Its prompt carries the previous pass's findings verbatim (including any this session withdrew) and the fix delta `git diff <reviewed head>..HEAD`, where the reviewed head is the one `prior` shows for the failing pass. It re-derives each prior finding against the code and looks for new defects in the fix delta only, and does not run the project's test suite (the gate and CI own that). Its output keeps "Since Last Pass" with a `file:line` for every resolved or withdrawn finding, a one-line pre-screening per changed function, and the `merge-review-state` block; it drops What's Good, Suggestions and Score Breakdown.
+- **Test or docs follow-ups**: a delta after an approval that touches only tests or docs is reviewed inline by this session with the §1–§4 rubric on the delta, under `verify`'s fake-green guard; any production code goes to a subagent.
+- **Breaker**: at most **two** confirmation passes after each first pass. If the second still lands below the threshold, STOP: surface the open findings and their evidence to the user, never start a third pass.
 
 Opt-out for offline/cheap runs: `{"inline_review": true}` in `.git/merge-review.json` — a **trusted source only**, like every gate knob (§0c); the cloneable tree file can never set it. Inline mode keeps the full §1–§4 rigor in this session.
 
@@ -208,7 +208,7 @@ When `auto_fix` is on and the score is below threshold, **drive the diff to read
 **The loop:**
 1. Apply the attested fixes (minimal, root-cause — no band-aids; match the project's patterns, naming and commit convention; no AI attribution).
 2. Run `python3 "${SKILL}" verify --repo .` — the fake-green guard. It must pass before you commit (never disable/delete/weaken a test, no `--no-verify`, `|| true`, lowered thresholds). If verify fails, your "fix" is hiding the finding — redo it properly.
-3. Commit the fix, then **review the new obligation** (the delta `context` returns) with a proportionate pass (§0a) and `python3 "${SKILL}" record --repo . --score <N> --passed` (drop `--passed` if still below threshold): this records the pass and, at threshold, clears the pre-push gate.
+3. Commit the fix, then **review it with a confirmation pass** (§0a: the fix delta since the reviewed head) and `python3 "${SKILL}" record --repo . --score <N> --passed` (drop `--passed` if still below threshold): this records the pass and, at threshold, clears the pre-push gate.
 4. Repeat until the score is **≥ threshold**, only **contestable** findings remain, or the breaker (two confirmation passes, §0a) trips.
 5. If only contestable findings remain below threshold, the breaker tripped, or the only way to pass is a workaround → **STOP**. Surface the remaining findings and the evidence; do not bypass, do not force-pass. The user decides.
 
