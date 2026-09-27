@@ -12,8 +12,12 @@ from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
 
 
+HOOK_COMMANDS = ("commit", "push", "checkout")
+
+
 def run(cmd, cwd, check=False, raw=False, timeout=None):
-    if cmd[:1] == ["git"]:
+    # git hands -c on to the hooks these spawn, and the user's own hooks are not ours to restrict
+    if cmd[:1] == ["git"] and cmd[1:2] and cmd[1] not in HOOK_COMMANDS:
         cmd = ["git", "-c", "safe.bareRepository=explicit"] + cmd[1:]
     try:
         p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)

@@ -329,7 +329,9 @@ Run the E2E lane deliberately: before a release or after a harness change.
   never from the working-tree `.<plugin>.json` that arrives with any clone.
 - **No implicit bare repository.** Every git call the kernel makes carries `-c safe.bareRepository=explicit`
   (git 2.38+), so a directory shaped like a bare repository inside a clone is never opened as a git dir:
-  its HEAD, its git config and any `.git/`-style state in it are never read. With git 2.38 to 2.44 the same
+  its HEAD, its git config and any `.git/`-style state in it are never read. `commit`, `push` and
+  `checkout` are the exception: git hands `-c` on to the hooks they spawn, which are the user's, and they
+  only run after guarded reads have found a real branch. With git 2.38 to 2.44 the same
   guard also refuses a path inside a normal repo's `.git/`; the harness never works from there.
 - **Read-only watchers.** mr-watchdog never commits, pushes, or merges, and runs no model itself.
 - **Branch-first, never the trunk.** ship-when-done never commits or pushes the default branch, and

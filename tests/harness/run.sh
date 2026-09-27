@@ -515,5 +515,10 @@ git -C "$ROOT/real-wt" config user.email t@t.t; git -C "$ROOT/real-wt" config us
 echo w > "$ROOT/real-wt/w.txt"; git -C "$ROOT/real-wt" add -A; git -C "$ROOT/real-wt" commit -qm w
 python3 "$SHIP" gate --repo "$ROOT/real-wt" --need n17 >/dev/null 2>&1
 assert_eq 1 "$(wc -l < "$ROOT/gate17b.log" | tr -d ' ')" "17b. a worktree of a real bare repository keeps its trusted gate"
+dH="$ROOT/hooked"; new_repo "$dH" --remote; git -C "$dH" checkout -q -b feat17b; git init -q --bare "$ROOT/cache17b.git"
+printf '#!/bin/sh\ncd %s && git rev-parse --git-dir >/dev/null\n' "$ROOT/cache17b.git" > "$dH/.git/hooks/pre-commit"; chmod +x "$dH/.git/hooks/pre-commit"
+echo x > "$dH/x.txt"
+assert_contains '"committed": true' "$(python3 "$SHIP" commit --need n17 --repo "$dH" --summary x --type chore 2>&1)" \
+  "17b. the user's own hooks never inherit the guard (a pre-commit hook using a bare cache still works)"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]
