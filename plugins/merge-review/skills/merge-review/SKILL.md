@@ -218,6 +218,14 @@ This is what the pre-push gate asks for: it denies the **first** push of an unre
 
 ---
 
+## When driven
+
+While a delivery-conductor need drives the branch, this skill does its judgment step only: review the
+HEAD the conductor names, apply the attested fixes, record the verdict for that exact sha with the
+command the conductor gives, then end your turn. Never commit or push, and skip §5's commit and re-run
+steps: the conductor commits the fixes and asks for the next pass. Give the fresh-eyes reviewer subagent
+a description containing the need token the conductor names (`need:<id>`), so it waits on that task.
+
 ## Stage protocol (delivery-conductor)
 
 `scripts/review.py stage --repo R --need N` answers, read-only, where a need stands in its `reviewing` stage:

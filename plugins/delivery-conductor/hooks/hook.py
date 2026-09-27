@@ -13,6 +13,12 @@ def main():
                            capture_output=True, text=True, timeout=290)
         if r.stdout.strip():
             sys.stdout.write(r.stdout)
+        if r.stderr.strip():
+            log = os.path.join(os.environ.get("HARNESS_LIVE_DIR") or os.path.expanduser("~/.claude/harness-live"),
+                               "delivery-conductor-hook.err")
+            os.makedirs(os.path.dirname(log), exist_ok=True)
+            with open(log, "a") as f:
+                f.write(f"--- {event}\n{r.stderr[-4000:]}\n")
     except Exception:
         pass
 

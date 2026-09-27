@@ -227,19 +227,22 @@ file exists whenever it is enabled, and only its `prepush_gate` flag arms ship-w
 
 ### The conductor
 
-`delivery-conductor` owns no stage. A need opens on its own branch (`conductor.py open`, the prompt,
-its summary and criteria) and lives in `.git/conductor.json` while that branch is driven. At every Stop
+`delivery-conductor` owns no stage. A need opens on its own branch, cut from the base (`conductor.py
+open`: the prompt the hook captured, a summary and criteria; one need per worktree), and lives in
+`.git/conductor.json` while that branch is driven. At every Stop
 the conductor asks the owners' `stage` CLIs, in the order of the table above, and acts on the first
 stage that is not done: a `script` step runs inside the hook (several can chain within its time
 budget), a `background` step comes back as a command to launch, and while a task carrying the need
-token runs the conductor waits instead of asking again; a `skill` step is the model's judgment step.
+token runs (`--need <id>` in a shell command, `need:<id>` in a subagent's description, such as the
+reviewer's) the conductor waits instead of asking again; a `skill` step is the model's judgment step.
 Every human prompt during a need is classified (`halt`, `resume`, `abandon`, `amend`, `note`) before
 the need advances; compaction and `/clear` re-bind the need to the same Claude process (`CLAUDE_PID`).
 
 A need is blocked, and the user told once, on the same blocking decision three times with no change in
-work state, on a stage's attempt budget (three review passes, six otherwise), or past eight hours. A
-blocked or abandoned need keeps its branch held (driven) until `resume` or `release`; a need that
-reaches `ready` leaves the ledger, so its siblings speak again.
+work state, on a stage failing too many times in a row (three reviews, six otherwise; the stage being
+done resets it), or past eight hours of driven time (`resume` restarts the clock). A blocked or
+abandoned need keeps its branch held (driven) until `resume` or `release`; `release` and `ready` hand the
+branch back at the next prompt, so no sibling speaks in the deciding turn.
 
 ## 6. Engagement modes
 

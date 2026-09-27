@@ -112,6 +112,12 @@ delivery-conductor), it prints a neutral verdict line instead of the fix directi
 the evidence into the next instruction. `handoff --session S --branch B` is how ship-when-done engages the
 watch for a branch its session pushed.
 
+## When driven
+
+While a delivery-conductor need drives the branch, the watcher is launched with the command the
+conductor names (it carries `--need <id>`) and prints a neutral verdict line; on red, fix the root cause
+and run `verify`, then end your turn. Never commit or push: the conductor does.
+
 ## Stage protocol (delivery-conductor)
 
 `scripts/watch.py stage --repo R --need N` answers, read-only, where a need stands in its `ci` stage:

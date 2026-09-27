@@ -150,6 +150,12 @@ python3 scripts/ship.py ladder --verdict '{"done":true}' --gate pass   # run the
 python3 scripts/ship.py engage --goal "<ticket/prompt>"         # full flow (opt-in repos only)
 ```
 
+## When driven
+
+While a delivery-conductor need drives the branch, this plugin's hooks stand down and the conductor runs
+its owner steps (`commit`, `gate`, `mark-done`, `push`, `open-pr`, `mark-ready`) itself. Do not declare
+`mark-done` or ship by hand on a driven branch.
+
 ## Stage protocol (delivery-conductor)
 
 `scripts/ship.py stage --repo R --need N --stage S` answers, read-only, where a need stands in the stages ship-when-done owns (`implementing`, `gating`, `shipping`, `ready`):

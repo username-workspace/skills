@@ -70,7 +70,7 @@ assert_eq "" "$(stop "$d" s1 p1 "[{\"id\":\"t1\",\"status\":\"running\",\"comman
 bash -c "$gate" >/dev/null 2>&1
 out=$(stop "$d" | reason)
 assert_contains "merge-review" "$out" "3. gate green, nothing to prove → the review is the next judgment step"
-assert_contains "foreground" "$out" "3. and it runs in the foreground under drive"
+assert_contains "need:$nid" "$out" "3. and it names the need token the review subagent must carry"
 python3 "$REPO_ROOT/plugins/merge-review/skills/merge-review/scripts/review.py" record --repo "$d" --sha HEAD --score 95 >/dev/null
 watch=$(stop "$d" | reason | quoted)
 assert_contains "run --need $nid" "$watch" "3. reviewed → shipped by script steps, then the CI watcher as a background step"
@@ -79,7 +79,9 @@ bash -c "$watch" >/dev/null 2>&1
 out=$(stop "$d" | reason)
 assert_contains "Need ready" "$out" "3. CI green → marked ready and reported"
 assert_contains "pr ready" "$(cat "$ROOT/gh.log")" "3. the draft PR is marked ready"
-assert_eq "{}" "$(ledger "$d" "['needs']")" "3. a ready need leaves the ledger: its branch is not driven any more"
+assert_eq "ready" "$(ledger "$d" "['needs']['$nid']['state']")" "3. a ready need is marked ready"
+payload "$d" s1 p5 "thanks" | hook prompt >/dev/null
+assert_eq "{}" "$(ledger "$d" "['needs']")" "3. and leaves the ledger at the next prompt: its branch is not driven any more"
 assert_eq "$nid" "$(ledger "$d" "['history'][-1]['id']")" "3. and it is kept in the history"
 assert_eq "" "$(stop "$d")" "3. after ready the conductor is silent"
 
@@ -112,7 +114,8 @@ assert_contains "driven by need $nid" "$(CLAUDE_PID=9999 payload "$d" s3 "" "" "
 python3 "$CS" abandon --repo "$d" --session s2 >/dev/null
 assert_eq "abandoned" "$(ledger "$d" "['needs']['$nid']['state']")" "7. abandon keeps the need, and its branch held"
 python3 "$CS" release --repo "$d" --session s2 >/dev/null
-assert_eq "{}" "$(ledger "$d" "['needs']")" "7. release takes it out of the ledger"
+payload "$d" s2 p7 "ok" | hook prompt >/dev/null
+assert_eq "{}" "$(ledger "$d" "['needs']")" "7. release takes it out of the ledger at the next prompt"
 
 # 8. open refuses what it cannot drive, and a corrupt ledger is surfaced, never a traceback
 d="$ROOT/r8"; new_repo "$d"; echo dirty > "$d/x.txt"
@@ -123,5 +126,55 @@ echo '{not json' > "$d/.git/conductor.json"
 out=$(stop "$d")
 assert_contains "systemMessage" "$out" "8. a corrupt ledger is surfaced at Stop"
 assert_absent "Traceback" "$out" "8. never as a traceback"
+
+# 9. a need starts from the base: work already on the current branch is never the need's
+d="$ROOT/r9"; new_repo "$d"; git -C "$d" checkout -q -b feature; echo old > "$d/old.txt"; git -C "$d" add -A; git -C "$d" commit -qm "old work"
+nid=$(open_need "$d")
+assert_contains "Implement need $nid" "$(stop "$d" | reason)" "9. a need opened on a branch with commits still starts with no work of its own"
+
+# 10. one need per worktree; a mismatch is bounded; another session on a driven branch is not nudged to open
+python3 "$CS" open --repo "$d" --session s9b --summary other >/dev/null 2>&1; assert_eq 1 "$?" "10. a second need in the same worktree is refused"
+assert_eq "" "$(payload "$d" s9b q1 "do something else" | hook prompt)" "10. another session on a driven branch is not nudged to open a need"
+git -C "$d" checkout -q main
+for i in 1 2; do stop "$d" s1 m1 >/dev/null; done
+assert_contains "is blocked: no progress" "$(stop "$d" s1 m1 | reason)" "10. a need left on another branch trips the stall breaker"
+
+# 11. resume re-arms the wall clock too
+d="$ROOT/r11"; new_repo "$d"; nid=$(open_need "$d")
+python3 "$CS" halt --repo "$d" --session s1 >/dev/null
+python3 -c 'import json,sys; p=sys.argv[1]+"/.git/conductor.json"; l=json.load(open(p)); n=l["needs"][sys.argv[2]]
+n["created"]="2020-01-01T00:00:00+00:00"; n["clock"]="2020-01-01T00:00:00+00:00"; json.dump(l, open(p,"w"))' "$d" "$nid"
+python3 "$CS" resume --repo "$d" --session s1 >/dev/null
+assert_contains "Implement need $nid" "$(stop "$d" | reason)" "11. a need resumed after a long halt drives again"
+
+# 12. a driven review in a subagent is waited on, like a shell step
+d="$ROOT/r12"; new_repo "$d"; nid=$(open_need "$d"); echo w > "$d/w.txt"
+gate=$(stop "$d" | reason | quoted); bash -c "$gate" >/dev/null 2>&1
+assert_contains "need:$nid" "$(stop "$d" | reason)" "12. the review instruction names the need token for the subagent's description"
+task="[{\"id\":\"a1\",\"type\":\"subagent\",\"status\":\"running\",\"description\":\"review need:$nid\"}]"
+for i in 1 2 3; do out=$(stop "$d" s1 p1 "$task"); done
+assert_eq "" "$out" "12. while the review subagent runs the conductor waits"
+assert_eq "active" "$(ledger "$d" "['needs']['$nid']['state']")" "12. and the wait never trips the stall breaker"
+
+# 13. the per-stage budget counts failures, not the instructions of a stage that keeps moving
+for i in 1 2 3 4; do echo "v$i" > "$d/w.txt"; stop "$d" >/dev/null; gate=$(stop "$d" | reason | quoted); [ -n "$gate" ] && bash -c "$gate" >/dev/null 2>&1; stop "$d" >/dev/null; done
+assert_eq "active" "$(ledger "$d" "['needs']['$nid']['state']")" "13. four review requests on four new heads never exhaust the review budget"
+
+# 14. leaving the driven state takes effect at the next prompt, so no sibling speaks in the deciding turn
+d="$ROOT/r14"; new_repo "$d"; nid=$(open_need "$d"); echo hi > "$d/hi.txt"
+gate=$(stop "$d" | reason | quoted); bash -c "$gate" >/dev/null 2>&1; stop "$d" >/dev/null
+python3 "$REPO_ROOT/plugins/merge-review/skills/merge-review/scripts/review.py" record --repo "$d" --sha HEAD --score 95 >/dev/null
+watch=$(stop "$d" | reason | quoted); bash -c "$watch" >/dev/null 2>&1
+assert_contains "Need ready" "$(stop "$d" | reason)" "14. the need reaches ready"
+assert_eq "True" "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import _kernel as k
+print(k.driven(sys.argv[2], "s1", "p1"))' "$REPO_ROOT/lib" "$d")" "14. its branch stays driven for the rest of that prompt"
+payload "$d" s1 p9 "thanks" | hook prompt >/dev/null
+assert_eq "{}" "$(ledger "$d" "['needs']")" "14. the next prompt hands the branch back"
+
+# 15. the prompt a need opens with is the one the hook captured, never a transcription
+d="$ROOT/r15"; new_repo "$d"
+payload "$d" s1 p1 "fix the user's \"cart\" bug; don't touch prices" | hook prompt >/dev/null
+nid=$(python3 "$CS" open --repo "$d" --session s1 --summary "fix cart" | python3 -c 'import json,sys; print(json.load(sys.stdin)["need"])')
+assert_eq "fix the user's \"cart\" bug; don't touch prices" "$(ledger "$d" "['needs']['$nid']['prompt']")" "15. open stores the captured prompt verbatim"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]
