@@ -561,6 +561,7 @@ for _ in $(seq 1 50); do [ -s "$STATE/$h49.spawn" ] && break; sleep 0.1; done
 pg49="$(sed -n 's/^pgid=//p' "$STATE/$h49.spawn" 2>/dev/null | head -1)"; sleep 0.3
 LANG=C LC_ALL=C TZ=UTC run stop "$h49" >/dev/null 2>&1; sleep 0.3
 ps -A -o pgid=,stat= | awk -v g="$pg49" '$1==g && $2 !~ /^Z/' | grep -q . && ko "49. a stop from another locale and time zone still kills the session" || ok "49. a stop from another locale and time zone still kills the session"
+[ -n "$pg49" ] && kill $(ps -A -o pid=,pgid= | awk -v g="$pg49" '$2==g {print $1}') 2>/dev/null
 # 50. stop ends a window session's claude and lets its launcher close the tab
 printf '#!/usr/bin/env bash\necho $$ > "%s"\nexec sleep 30\n' "$ROOT/win50.pid" > "$ROOT/bin/claude-sleep"; chmod +x "$ROOT/bin/claude-sleep"
 : > "$ROOT/osascript.cap"; rm -f "$ROOT/win50.pid"
@@ -571,6 +572,24 @@ run stop win50 >/dev/null 2>&1; sleep 0.5
 { [ -n "$claude50" ] && ! kill -0 "$claude50" 2>/dev/null; } && ok "50. stop ends a window session's claude" || ko "50. stop ends a window session's claude (pid=$claude50)"
 kill -0 "$launcher50" 2>/dev/null && ko "50. the launcher regains control and exits (closing its tab)" || ok "50. the launcher regains control and exits (closing its tab)"
 [ -n "$claude50" ] && kill "$claude50" 2>/dev/null; kill "$launcher50" 2>/dev/null; wait "$launcher50" 2>/dev/null
+# 51. a launcher run by hand after open gave up leaves no half record behind
+rm -f "$ROOT/win50.pid" "$STATE/win51.spawn"
+CRS_CLAUDE_BIN="$ROOT/bin/claude-sleep" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" TERM_PROGRAM=iTerm.app bash "$DRIVER" open win51 >/dev/null 2>&1
+rm -f "$STATE/win51.spawn"; bash "$STATE/win51.cmd" >/dev/null 2>&1 & l51=$!
+for _ in $(seq 1 50); do [ -s "$ROOT/win50.pid" ] && break; sleep 0.1; done
+[ -e "$STATE/win51.spawn" ] && ko "51. a hand-run launcher never writes a record open did not create" || ok "51. a hand-run launcher never writes a record open did not create"
+c51="$(cat "$ROOT/win50.pid" 2>/dev/null)"; [ -n "$c51" ] && kill "$c51" 2>/dev/null; kill "$l51" 2>/dev/null; wait "$l51" 2>/dev/null
+# 52. a relaunched launcher is stopped by its own record, not by the first run's
+rm -f "$ROOT/win50.pid"
+CRS_CLAUDE_BIN="$ROOT/bin/claude-sleep" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" TERM_PROGRAM=iTerm.app bash "$DRIVER" open win52 >/dev/null 2>&1
+bash "$STATE/win52.cmd" >/dev/null 2>&1 & la=$!
+for _ in $(seq 1 50); do [ -s "$ROOT/win50.pid" ] && break; sleep 0.1; done
+kill "$(cat "$ROOT/win50.pid")" 2>/dev/null; wait "$la" 2>/dev/null; rm -f "$ROOT/win50.pid"
+bash "$STATE/win52.cmd" >/dev/null 2>&1 & lb=$!
+for _ in $(seq 1 50); do [ -s "$ROOT/win50.pid" ] && break; sleep 0.1; done; cb="$(cat "$ROOT/win50.pid" 2>/dev/null)"
+run stop win52 >/dev/null 2>&1; sleep 0.5
+{ [ -n "$cb" ] && ! kill -0 "$cb" 2>/dev/null; } && ok "52. stop ends the relaunched session's claude" || ko "52. stop ends the relaunched session's claude (pid=$cb)"
+[ -n "$cb" ] && kill "$cb" 2>/dev/null; kill "$lb" 2>/dev/null; wait "$lb" 2>/dev/null
 echo
 echo "PASS=$PASS FAIL=$FAIL"
 rm -rf "$ROOT"

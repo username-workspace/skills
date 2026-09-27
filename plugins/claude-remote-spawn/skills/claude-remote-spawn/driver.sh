@@ -20,7 +20,7 @@ need_claude(){ [ -n "$CLAUDE" ] || die "claude not found (set CRS_CLAUDE_BIN)"; 
 need_script(){ command -v script >/dev/null 2>&1 || die "script(1) not found"; }
 need_procps(){ command -v pgrep >/dev/null 2>&1 && command -v pkill >/dev/null 2>&1 \
   || die "pgrep/pkill not found — install procps (session liveness, list and stop rely on them)"; }
-spawn_get(){ sed -n "s/^$2=//p" "$STATE_DIR/$1.spawn" 2>/dev/null | head -1; }
+spawn_get(){ sed -n "s/^$2=//p" "$STATE_DIR/$1.spawn" 2>/dev/null | tail -1; }
 is_running(){ [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
 leader_start(){ LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null; }
 # $1=pgid: that group and its descendants (script(1) may start claude in a session of its own);
@@ -287,7 +287,7 @@ case "$cmd" in
       printf '#!/usr/bin/env bash\n'
       printf 'cd %q || exit 1\n' "$cwd"
       printf 'unset %s\n' "$PARENT_SESSION_ENV"
-      printf 'printf "launcher=%%s\\nleader_start=%%s\\n" "$$" "$(LC_ALL=C TZ=UTC0 ps -o lstart= -p $$)" >> %q\n' "$STATE_DIR/$name.spawn"
+      printf '[ -f %q ] && printf "launcher=%%s\\nleader_start=%%s\\n" "$$" "$(LC_ALL=C TZ=UTC0 ps -o lstart= -p $$)" >> %q\n' "$STATE_DIR/$name.spawn" "$STATE_DIR/$name.spawn"
       printf '%q --remote-control %q -n %q' "$CLAUDE" "$name" "$name"
       [ -n "$model" ]  && printf ' --model %q' "$model"
       [ -n "$prompt" ] && printf ' %q' "$prompt"
@@ -374,9 +374,9 @@ case "$cmd" in
     fi
     [ -n "$pids" ] || echo "note: $name's recorded process is gone or no longer its own; nothing killed" >&2
     rm -f "$STATE_DIR/$name.spawn" "$STATE_DIR/$name.log" "$STATE_DIR/$name.cmd"
+    keepawake_sync
     echo "stopped $name"
     [ -z "$pids" ] || kill $pids 2>/dev/null || true
-    keepawake_sync
     ;;
   check)
     echo "claude : $([ -n "$CLAUDE" ] && "$CLAUDE" --version 2>/dev/null || echo 'NOT FOUND')"
