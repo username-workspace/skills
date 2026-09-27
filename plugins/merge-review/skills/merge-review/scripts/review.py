@@ -7,7 +7,7 @@ push of a branch this session produced until the current HEAD has a passing revi
 the per-pass state so runs are iterative, and a fake-green check the fix loop runs before committing. It
 never commits, pushes, or merges, and runs no model itself. Opt a repo out with enabled:false.
 """
-import argparse, json, os, shlex, subprocess, sys
+import argparse, json, os, re, shlex, subprocess, sys
 from datetime import datetime, timezone
 from shutil import which
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -185,12 +185,12 @@ def cmd_record(args):
             sys.exit(1)
     score = int(args.score) if args.score is not None else None
     passed = bool(args.passed) or (score is not None and score >= int(cfg.get("threshold", 80)))
-    base = None
-    if args.base:
-        rc, base, _ = run(["git", "rev-parse", "--verify", "--quiet", f"{args.base}^{{commit}}"], repo)
-        if rc != 0:
-            print(f"[merge-review] ✗ --base {args.base} names no commit: nothing recorded")
-            sys.exit(1)
+    base = args.base
+    if base and not (args.sha and re.fullmatch(r"[0-9a-f]{40}([0-9a-f]{24})?", base)
+                     and run(["git", "merge-base", "--is-ancestor", base, sha], repo)[0] == 0):
+        print(f"[merge-review] ✗ --base must be the packet's base_sha, an ancestor of its head_sha "
+              f"(--sha): nothing recorded")
+        sys.exit(1)
     data = {"branch": cur_branch(repo), "head": sha, "score": score,
             "passed": passed, "pass": int(prev.get("pass", 0)) + 1, "findings": findings, "base": base}
     write_state(repo, data)
@@ -413,7 +413,7 @@ def cmd_context(args):
     diff_range = f"{ref}...HEAD"
     rc, current_base, _ = run(["git", "merge-base", ref, "HEAD"], repo)
     current_base = current_base if rc == 0 else None
-    if (current_base and prior.get("passed") and prior.get("head") not in (None, head_sha(repo))
+    if (current_base and prior.get("head") not in (None, head_sha(repo))
             and branch and prior.get("branch") == branch and prior.get("base") == current_base
             and run(["git", "merge-base", "--is-ancestor", prior["head"], "HEAD"], repo)[0] == 0):
         diff_range = f"{prior['head']}..HEAD"   # the OBLIGATION shrinks to the delta; the gate
@@ -421,7 +421,8 @@ def cmd_context(args):
            "base": base, "remote": remote, "forge": forge,
            "threshold": int(cfg.get("threshold", 80)), "auto_fix": bool(cfg.get("auto_fix", True)),
            "inline_review": bool(cfg.get("inline_review", False)),
-           "diff_cmd": f"git diff {diff_range}", "base_sha": current_base, "commits": commits,
+           "diff_cmd": f"git diff {diff_range}", "head_sha": head_sha(repo), "base_sha": current_base,
+           "commits": commits,
            "mr": fetch_mr_context(repo, forge, branch)}
     if args.packet:
         diff = subprocess.run(["git", "diff", diff_range], cwd=repo, capture_output=True).stdout.decode("utf-8", "replace")
