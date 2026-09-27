@@ -385,6 +385,17 @@ def previous_prompt_id(transcript, prompt_id):
         return None
 
 
+MACHINE_PROMPT_RE = re.compile(
+    r"^\s*(?:Another Claude session sent a message:[^\n]*\n\s*)?"
+    r"<(?:task-notification|agent-message|cross-session-message)\b")
+
+
+def is_machine_prompt(prompt):
+    """Harness envelopes (task notifications, agent hand-backs, cross-session messages) arrive as
+    prompts; their wording is model output, never the user's intent."""
+    return bool(MACHINE_PROMPT_RE.match(prompt or ""))
+
+
 def conductor_live(session, prompt_id, transcript=None, at_prompt=False):
     """The conductor's stamp when it ran for this prompt. A UserPromptSubmit caller runs in parallel
     with the conductor's own hook, so it also accepts the stamp of the prompt just before."""

@@ -225,6 +225,22 @@ need. The harness plugins update together; a sibling too old for `handoff` leave
 `.git/swd-handoff.json`. merge-review's presence and its push hold are separate: its session
 file exists whenever it is enabled, and only its `prepush_gate` flag arms ship-when-done's hold.
 
+### The conductor
+
+`delivery-conductor` owns no stage. A need opens on its own branch (`conductor.py open`, the prompt,
+its summary and criteria) and lives in `.git/conductor.json` while that branch is driven. At every Stop
+the conductor asks the owners' `stage` CLIs, in the order of the table above, and acts on the first
+stage that is not done: a `script` step runs inside the hook (several can chain within its time
+budget), a `background` step comes back as a command to launch, and while a task carrying the need
+token runs the conductor waits instead of asking again; a `skill` step is the model's judgment step.
+Every human prompt during a need is classified (`halt`, `resume`, `abandon`, `amend`, `note`) before
+the need advances; compaction and `/clear` re-bind the need to the same Claude process (`CLAUDE_PID`).
+
+A need is blocked, and the user told once, on the same blocking decision three times with no change in
+work state, on a stage's attempt budget (three review passes, six otherwise), or past eight hours. A
+blocked or abandoned need keeps its branch held (driven) until `resume` or `release`; a need that
+reaches `ready` leaves the ledger, so its siblings speak again.
+
 ## 6. Engagement modes
 
 "Engagement" answers one question: *should this plugin act on the current branch right now?* There are
