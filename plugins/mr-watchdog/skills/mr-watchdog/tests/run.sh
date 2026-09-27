@@ -38,7 +38,7 @@ cat > "$ROOT/bin/glab" <<'EOF'
 ci="${STUB_CI:-pending}"
 case "$1 $2" in
   "mr list")   if [ -n "${STUB_MR_ERR:-}" ]; then echo "$STUB_MR_ERR" >&2; exit 1; fi
-               echo "[{\"iid\":4,\"state\":\"${STUB_MR_STATE_GL:-opened}\"}]";;
+               echo "[{\"iid\":4,\"state\":\"${STUB_MR_STATE_GL:-opened}\",\"source_project_id\":${STUB_MR_SOURCE_PROJECT:-${STUB_GL_PROJECT_ID:-1}}}]";;
   "ci status") if [ "$ci" = none ]; then echo "No pipeline found for branch x"; exit 1; fi
                printf 'https://gitlab.com/t/r/-/pipelines/1\nSHA: x\nPipeline state: %s\n' "$ci";;
   "ci trace")  echo "INTERACTIVE-PICKER"; exit 1;;
@@ -67,7 +67,7 @@ PY
        *"/merge_requests?"*) if [ -n "${STUB_GL_MRS:-}" ]; then cat "$STUB_GL_MRS"; else echo '[]'; fi;;
        */merge_requests/*) cat "${STUB_GL_MR:-/dev/null}";;
        */repository/commits/*) cat "${STUB_GL_COMMIT:-/dev/null}";;
-       projects/test%2Frepo) echo "{\"id\":${STUB_GL_PROJECT_ID:-1}}";;
+       projects/test%2Frepo) [ -n "${STUB_GL_PROJECT_FAIL:-}" ] && exit 1; echo "{\"id\":${STUB_GL_PROJECT_ID:-1}}";;
        *) echo '[]';;
      esac;;
   *) exit 0;;
@@ -127,6 +127,13 @@ os.environ["STUB_MR_ERR"]="HTTP 502: Bad Gateway"
 ck(watch.mr_open(R,"github","feat") is None, "mr_open github: a forge error is unknown, never closed")
 ck(watch.mr_open(R,"gitlab","feat") is None, "mr_open gitlab: a forge error is unknown, never closed")
 del os.environ["STUB_MR_ERR"]
+ck(watch.mr_open(R,"gitlab","feat") is True, "mr_open gitlab: an MR from the project the branch is pushed to is open")
+os.environ["STUB_MR_SOURCE_PROJECT"]="99"
+ck(watch.mr_open(R,"gitlab","feat") is False, "mr_open gitlab: a stranger's fork MR with the same branch name is not ours")
+del os.environ["STUB_MR_SOURCE_PROJECT"]
+os.environ["STUB_GL_PROJECT_FAIL"]="1"
+ck(watch.mr_open(R,"gitlab","feat") is None, "mr_open gitlab: a project it cannot resolve leaves the MR unknown, never closed")
+del os.environ["STUB_GL_PROJECT_FAIL"]
 PY
 new_repo "$ROOT/t2repo" gitlab.com
 while IFS= read -r l; do case "$l" in PASS*) ok "${l#PASS }";; FAIL*) ko "${l#FAIL }";; esac; done < <(python3 "$ROOT/t2.py" "$SCRIPTS" "$ROOT/t2repo")
@@ -242,6 +249,7 @@ d="$ROOT/t_nomr"; new_repo "$d";  assert_contains '"no-mr"' "$(STUB_CI=failed ST
 out=$(STUB_CI=failed STUB_MR_ERR="HTTP 502" tick "$d")
 assert_contains '"continue"' "$out" "4. a forge error on the MR lookup → keep polling"
 assert_absent '"no-mr"' "$out" "4. a forge error on the MR lookup is never no-mr"
+assert_contains '"mr": "error"' "$out" "4. and the poll says the MR lookup is what failed"
 
 # 5. tick: failed → needs-fix WITH the failing log, and READ-ONLY (no commit, HEAD unchanged)
 d="$ROOT/t_fail"; new_repo "$d"; before=$(count "$d" HEAD)

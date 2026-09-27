@@ -266,6 +266,14 @@ do not.
 > baseline, or a corrupt state file all resolve to *not engaged*. The harness never acts on a branch
 > it is unsure about.
 
+**Worktrees.** Hooks act on the repository of the session's cwd (or of the repo a push command
+names), so a session works on a linked worktree by working from inside it, as `EnterWorktree` does;
+the worktree then reads the repository's trusted `.git/` config. In a submodule workspace (the cwd's
+repo has a `.gitmodules`) the last edited file's repo wins when it is nested under the cwd, so a
+nested worktree edited by absolute path is found there. Elsewhere such a session is attributed to the
+main checkout: extending that rule to every repo would parse the transcript at every hook of every
+repo.
+
 ---
 
 ## 7. Test architecture

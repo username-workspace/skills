@@ -69,10 +69,12 @@ def mr_open(repo, forge, branch):
             return None
     if forge == "gitlab":
         rc, out, _ = run(["glab", "mr", "list", "--source-branch", branch, "-F", "json"], repo)
-        if rc != 0:
+        own_project = gitlab_branch_project_id(repo) if rc == 0 else None
+        if own_project is None:
             return None
         try:
-            return any((m.get("state") == "opened") for m in json.loads(out))
+            return any(m.get("state") == "opened" and m.get("source_project_id") == own_project
+                       for m in json.loads(out))
         except Exception:
             return None
     return False
@@ -390,7 +392,7 @@ def tick(repo, cfg, branch, forge, remote):
         return {"state": "branch-changed"}
     open_mr = mr_open(repo, forge, branch)
     if open_mr is None:
-        return {"state": "continue"}
+        return {"state": "continue", "mr": "error"}
     if not open_mr:
         return {"state": "no-mr"}
     status = ci_status(repo, forge, branch)
