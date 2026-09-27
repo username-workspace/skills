@@ -535,10 +535,11 @@ assert_contains "procps : NOT FOUND" "$(PATH="$ROOT/bin:$ROOT/noprocps" bash "$D
 # 47. a spawned session is top-level: none of the launching session's identity reaches it
 MARKERS="CLAUDECODE CLAUDE_PID CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN"
 export CRS_ENV_CAP="$ROOT/env.cap" CRS_ARGV_CAP="$ROOT/argv47.cap"; rm -f "$CRS_ENV_CAP"
-(for m in $MARKERS; do export "$m=from-parent"; done; export CLAUDE_CONFIG_DIR="$ROOT/account2"; run spawn toplevel) >/dev/null 2>&1
+(for m in $MARKERS; do export "$m=from-parent"; done; export CLAUDE_CONFIG_DIR="$ROOT/account2" CLAUDE_CODE_USE_BEDROCK=1; run spawn toplevel) >/dev/null 2>&1
 for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$CRS_ENV_CAP" ] && break; sleep 0.2; done
 envcap="$(cat "$CRS_ENV_CAP" 2>/dev/null)"
 assert_contains "CLAUDE_CONFIG_DIR=$ROOT/account2" "$envcap" "47. spawn: the account it runs under (CLAUDE_CONFIG_DIR) still reaches the new session"
+assert_contains "CLAUDE_CODE_USE_BEDROCK=1" "$envcap" "47. spawn: the user's own CLAUDE_CODE_* settings still reach it"
 for m in $MARKERS; do
   assert_eq 0 "$(printf '%s\n' "$envcap" | grep -c "^$m=")" "47. spawn: the launching session's $m never reaches the new session"
 done
