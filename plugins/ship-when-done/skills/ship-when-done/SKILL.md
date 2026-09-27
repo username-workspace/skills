@@ -150,6 +150,21 @@ python3 scripts/ship.py ladder --verdict '{"done":true}' --gate pass   # run the
 python3 scripts/ship.py engage --goal "<ticket/prompt>"         # full flow (opt-in repos only)
 ```
 
+## Stage protocol (delivery-conductor)
+
+`scripts/ship.py stage --repo R --need N --stage S` answers, read-only, where a need stands in the stages ship-when-done owns (`implementing`, `gating`, `shipping`, `ready`):
+a v1 report with the stage's `state` (`done`, `pending`, `blocked`), its `evidence` (bound to the exact
+work state or sha it was produced on) and the `next` step (`script`, `background` or `skill`). A repo that
+opted this plugin out gets `{"enabled": false}` from it. See `docs/architecture.md` in the marketplace.
+
+`stage` also takes `--summary` and `--type`, which shape the `commit` and `mark-done` steps it names. The
+owner steps are subcommands a conductor runs or instructs: `gate` (runs the detected gate, meant to be
+launched in the background, and leaves `.git/swd-gate.json` bound to the tree it started from, `stale` if the tree moved
+meanwhile), `commit`, `push` (still held while a merge-review pre-push gate has not passed the HEAD),
+`open-pr` and `mark-ready` (both consume the `mark-done` declaration; the PR is recorded in
+`.git/swd-pr.json`), and `clear-done`. `commit`, `push`, `open-pr` and `mark-ready` answer one JSON line,
+a refusal or a failure included (exit 1); none of them ever touches the default branch.
+
 ## Dependencies
 
 Only **`git`** and **Python 3** (stdlib only) — both already present wherever Claude Code runs. `gh`

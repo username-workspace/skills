@@ -115,12 +115,15 @@ plugin degrades to inert rather than crash.
 | `swd-claims.json` | ship-when-done | paths a live background writer has claimed (kept out of commits) |
 | `swd-done.json` | ship-when-done | the `mark-done` delivery declaration (the explicit-mode signal) |
 | `swd-gate.json` | ship-when-done | the last gate run's verdict + output tail + duration (observability) |
+| `swd-handoff.json` | ship-when-done | per sibling, the last `handoff` it refused (a version too old), cleared by its next success |
+| `swd-pr.json` | ship-when-done | the PR/MR a need's `open-pr` opened, per branch, and whether it was marked ready |
 | `swd-review-block.json`, `swd-url.json` | ship-when-done | once-per-state nudge / surfaced-URL dedup |
 | `merge-review-session.json` | merge-review | session baselines (engagement) |
 | `merge-review-state.json` | merge-review | the per-pass review record (score, findings, HEAD) |
 | `merge-review-gate.json` | merge-review | the pre-push gate's once-per-HEAD block dedup |
 | `mr-watchdog-session.json` | mr-watchdog | session baselines (engagement) |
 | `mr-watchdog-watch.json` | mr-watchdog | per-HEAD watch dedup |
+| `mr-watchdog-verdict.json` | mr-watchdog | the watcher's last verdict (green, red + log, stopped + reason), bound to the sha it watched |
 | `proof-of-fix.json` | proof-of-fix | each session's active repro (command + recorded red verdict) |
 | `conductor.json` | delivery-conductor | the need ledger: which branches a need holds (read by every sibling through `driven()`) |
 
@@ -186,6 +189,41 @@ the session's liveness stamp with the `prompt_id` Claude Code passes to every Us
 siblings re-engage by the next prompt. A UserPromptSubmit caller runs in parallel with the conductor's
 own hook, so it also accepts the previous prompt's stamp, read from the transcript's `promptId`
 entries. Under a running conductor, a corrupt ledger holds every branch (fail closed).
+
+### The stage protocol
+
+Each harness plugin answers `stage --repo R --need N` read-only, as a versioned report (`"v": 1`, built
+by the kernel's `stage_report`):
+
+```json
+{"v": 1, "stage": "gating", "state": "pending",
+ "evidence": {"sha": "…", "verdict": null, "file": ".git/swd-gate.json"},
+ "next": {"kind": "background", "run": ["python3", ".../ship.py", "gate", "--need", "N", "--repo", "R"]}}
+```
+
+`state` is `done`, `pending` or `blocked`; `next.kind` is `none`, `script` (a short deterministic step the
+conductor runs itself), `background` (launched by the model with `run_in_background`, the need token
+first so it can be matched in the Stop input's `background_tasks`) or `skill` (a judgment step, described
+by `instruction`). Every answer reads local evidence bound to the exact work state or sha it was produced
+on, so a new HEAD sends the need back to the earliest stale stage by construction:
+
+| Stage | Owner | Done when |
+|---|---|---|
+| implementing | ship-when-done | the work is committed and the branch is ahead of its base |
+| gating | ship-when-done | `gate` passed at this work state, the tree unchanged while it ran |
+| proving | proof-of-fix | every repro the need's sessions recorded passed at this work state |
+| reviewing | merge-review | a record for the exact HEAD, score at or above the threshold |
+| shipping | ship-when-done | declared (`mark-done`), pushed at HEAD, PR/MR open |
+| ci | mr-watchdog | the watcher's verdict for the exact HEAD is green |
+| ready | ship-when-done | the draft PR/MR is marked ready for review |
+
+Every cross-plugin write goes through the owner's CLI: ship-when-done hands engagement over with
+`review.py handoff` and `watch.py handoff`. Each owner stamps its script path in its `.git/` state for
+discovery, and a repo that opts an owner out hears it from that owner's `stage` (`"enabled": false`),
+or finds no stamp at all (merge-review and mr-watchdog stamp nothing while disabled): both refuse the
+need. The harness plugins update together; a sibling too old for `handoff` leaves the refusal in
+`.git/swd-handoff.json`. merge-review's presence and its push hold are separate: its session
+file exists whenever it is enabled, and only its `prepush_gate` flag arms ship-when-done's hold.
 
 ## 6. Engagement modes
 
