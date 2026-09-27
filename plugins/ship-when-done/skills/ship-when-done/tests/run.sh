@@ -822,7 +822,7 @@ printf '["not", "a", "marker"]' > "$d/.git/swd-done.json"; mv "$d/.git/swd-pr.js
 assert_contains '"stage": "shipping"' "$(python3 "$SHIP" stage --repo "$d" --need N1 --stage shipping 2>&1)" \
   "N. a malformed declaration never crashes a stage"
 rm -f "$d/.git/swd-done.json"; mv "$ROOT/swd-pr.keep" "$d/.git/swd-pr.json"
-cp "$ROOT/swd-alt.json" "$d/swd-rel.json"
+printf '{"gate":"true"}' > "$d/swd-rel.json"
 step=$(cd "$d" && python3 "$SHIP" stage --repo . --need N1 --stage gating --config swd-rel.json)
 assert_contains "\"$(cd "$d" && pwd -P)/swd-rel.json\"" "$step" "N. a relative --config is carried into the steps as an absolute path"
 rm -f "$d/swd-rel.json"
