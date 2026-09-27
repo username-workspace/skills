@@ -51,7 +51,7 @@ python3 "${SKILL}" context --repo . --packet   # → context + materialized diff
 python3 "${SKILL}" prior   --repo .            # → the previous pass's state (score + findings) for §2bis
 ```
 
-The `diff_cmd` (and the packet's `diff`) may be an **incremental delta**: when a previous pass PASSED at a head that is an ancestor of HEAD, only the new commits need review; when that head was rebased or amended away on the same branch, only what differs from the approved patch replayed onto the current base (conflict resolutions, new commits, amendments). Only the *obligation* shrinks — the gate still requires a fresh record at the current HEAD.
+The `diff_cmd` (and the packet's `diff`) may be an **incremental delta**: when a previous pass PASSED at a head that is an ancestor of HEAD, only the new commits need review; when that head was rebased or amended away on the same branch, only what differs from the approved patch replayed onto the current base (conflict resolutions, new commits, amendments). Either shrink needs the base the approval was given against to still be in the current base's history; a rewritten base, another branch, or a history git cannot replay means the full diff again. A failing pass keeps the last approval, so the next obligation is still the delta from it. Only the *obligation* shrinks — the gate still requires a fresh record at the current HEAD.
 
 **Fresh-eyes review — the default.** The context that wrote a diff scores it too gently; the review runs in a clean-context subagent:
 

@@ -167,6 +167,8 @@ inc2="$ROOT/inc2"; mkrepo "$inc2"; git -C "$inc2" checkout -q -b feat; work "$in
 git -C "$inc2" checkout -q main; echo other > "$inc2/other.txt"; git -C "$inc2" add -A; git -C "$inc2" commit -qm "main moves"
 git -C "$inc2" checkout -q feat; git -C "$inc2" rebase -q main
 packet_diff(){ env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$1" --packet | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["diff"])'; }
+obligation_cmd(){ env PATH="${2:-$ROOT/realbin}" "$PY" "$RV" context --repo "$1" | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["diff_cmd"])'; }
+assert_contains "git diff " "$(obligation_cmd "$inc2" | grep -E '^git diff [0-9a-f]{40,64} HEAD$')" "incremental: after a rebase the obligation is the replayed approval against HEAD"
 assert_eq "" "$(packet_diff "$inc2")" "incremental: a clean rebase of the approved patch leaves nothing to review"
 echo "late fix" > "$inc2/late.txt"; git -C "$inc2" add -A; git -C "$inc2" commit -qm "fix: late"
 obligation="$(packet_diff "$inc2")"
@@ -184,6 +186,40 @@ echo resolved > "$cf/app.txt"; git -C "$cf" add app.txt; GIT_EDITOR=true git -C 
 obligation="$(packet_diff "$cf")"
 assert_contains "+resolved" "$obligation" "incremental: a rebase conflict's resolution is what gets reviewed"
 assert_absent "kept" "$obligation" "incremental: the part of the approved patch the rebase left alone is not"
+for how in rebase merge; do
+  rw="$ROOT/inc-rewound-$how"; mkrepo "$rw"
+  echo "SECRET=1" > "$rw/config.env"; git -C "$rw" add -A; git -C "$rw" commit -qm "main: oops"
+  git -C "$rw" checkout -q -b feat; work "$rw"
+  "$PY" "$RV" record --repo "$rw" --session s1 --score 90 --passed >/dev/null
+  git -C "$rw" checkout -q main; git -C "$rw" reset -q --hard HEAD~1; echo n > "$rw/n.txt"; git -C "$rw" add -A; git -C "$rw" commit -qm "main: next"
+  git -C "$rw" checkout -q feat
+  if [ "$how" = rebase ]; then git -C "$rw" rebase -q main; else git -C "$rw" merge -q --no-edit main; fi
+  assert_contains "+SECRET=1" "$(packet_diff "$rw")" "incremental: a commit the base dropped after the approval is reviewed ($how)"
+done
+other="$ROOT/inc-other"; mkrepo "$other"; git -C "$other" checkout -q -b feat; work "$other"
+"$PY" "$RV" record --repo "$other" --session s1 --score 90 --passed >/dev/null
+git -C "$other" checkout -q -b feat2; work "$other"
+assert_eq "git diff main...HEAD" "$(obligation_cmd "$other")" "incremental: an approval on another branch never shrinks this one's review"
+gone="$ROOT/inc-gone"; mkrepo "$gone"; git -C "$gone" checkout -q -b feat; work "$gone"
+"$PY" "$RV" record --repo "$gone" --session s1 --score 90 --passed >/dev/null
+git -C "$gone" commit -q --amend -m "amended"; git -C "$gone" reflog expire --expire=now --all; git -C "$gone" gc -q --prune=now
+assert_eq "git diff main...HEAD" "$(obligation_cmd "$gone")" "incremental: an approved head git no longer has means a full review"
+orphan="$ROOT/inc-orphan"; mkrepo "$orphan"; git -C "$orphan" checkout -q -b feat; work "$orphan"
+"$PY" "$RV" record --repo "$orphan" --session s1 --score 90 --passed >/dev/null
+git -C "$orphan" checkout -q --orphan tmp; git -C "$orphan" commit -qm "unrelated"; git -C "$orphan" branch -q -M tmp feat
+assert_eq "git diff main...HEAD" "$(obligation_cmd "$orphan")" "incremental: a history with no common base never replays the approval"
+mkdir -p "$ROOT/nomergetree"; ln -sf "$(command -v bash)" "$ROOT/nomergetree/bash"
+printf '#!/bin/bash\n[ "$1" = merge-tree ] && exit 129\nexec %s "$@"\n' "$(command -v git)" > "$ROOT/nomergetree/git"; chmod +x "$ROOT/nomergetree/git"
+assert_eq "git diff main...HEAD" "$(obligation_cmd "$inc2" "$ROOT/nomergetree")" "incremental: a git that cannot replay the approval means a full review"
+keep="$ROOT/inc-keep"; mkrepo "$keep"; git -C "$keep" checkout -q -b feat; work "$keep"
+"$PY" "$RV" record --repo "$keep" --session s1 --score 90 --passed >/dev/null
+git -C "$keep" checkout -q main; echo o > "$keep/o.txt"; git -C "$keep" add -A; git -C "$keep" commit -qm "main moves"
+git -C "$keep" checkout -q feat; git -C "$keep" rebase -q main
+"$PY" "$RV" record --repo "$keep" --session s1 --score 50 >/dev/null
+echo "fix" > "$keep/fix.txt"; git -C "$keep" add -A; git -C "$keep" commit -qm "fix: finding"
+obligation="$(packet_diff "$keep")"
+assert_contains "+fix" "$obligation" "incremental: after a failing pass the fix is reviewed"
+assert_absent "+change " "$obligation" "incremental: and a failing pass never throws away the last approval"
 
 # --- 6b. SECURITY: gate-evasion knobs are never honored from the cloneable tree file -------------
 sv="$ROOT/sec-knobs"; mkrepo "$sv"; git -C "$sv" checkout -q -b feat

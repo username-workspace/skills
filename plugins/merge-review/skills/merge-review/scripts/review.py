@@ -185,8 +185,13 @@ def cmd_record(args):
             sys.exit(1)
     score = int(args.score) if args.score is not None else None
     passed = bool(args.passed) or (score is not None and score >= int(cfg.get("threshold", 80)))
-    data = {"branch": cur_branch(repo), "head": sha, "score": score,
-            "passed": passed, "pass": int(prev.get("pass", 0)) + 1, "findings": findings}
+    branch = cur_branch(repo)
+    approved = prev.get("approved") if (prev.get("approved") or {}).get("branch") == branch else None
+    if branch and score is not None and score >= int(cfg.get("threshold", 80)):
+        _, approval_base, _ = run(["git", "merge-base", default_branch(repo, remote_name(repo)), sha], repo)
+        approved = {"branch": branch, "head": sha, "base": approval_base}
+    data = {"branch": branch, "head": sha, "score": score, "passed": passed,
+            "pass": int(prev.get("pass", 0)) + 1, "findings": findings, "approved": approved}
     write_state(repo, data)
     print(f"[merge-review] recorded pass {data['pass']}: score={score} passed={passed}")
 
@@ -409,12 +414,15 @@ def cmd_context(args):
     commits = [l for l in log.splitlines() if l.strip()][:50] if rc == 0 else []
     prior = read_state(repo)
     diff_range = f"{base}...HEAD"
-    if prior and prior.get("passed") and prior.get("head") and prior["head"] != head_sha(repo):
-        rc, _, _ = run(["git", "merge-base", "--is-ancestor", prior["head"], "HEAD"], repo)
+    approved = (prior or {}).get("approved") or {}
+    if (branch and approved.get("branch") == branch and approved.get("head") not in (None, head_sha(repo))
+            and approved.get("base")
+            and run(["git", "merge-base", "--is-ancestor", approved["base"], base], repo)[0] == 0):
+        rc, _, _ = run(["git", "merge-base", "--is-ancestor", approved["head"], "HEAD"], repo)
         if rc == 0:
-            diff_range = f"{prior['head']}..HEAD"   # the OBLIGATION shrinks to the delta; the gate
-        elif prior.get("branch") == branch:
-            replayed = replayed_tree(repo, base, prior["head"])
+            diff_range = f"{approved['head']}..HEAD"   # the OBLIGATION shrinks to the delta; the gate
+        else:
+            replayed = replayed_tree(repo, base, approved["head"])
             if replayed:
                 diff_range = f"{replayed} HEAD"
     ctx = {"mode": "local", "branch": branch,        # still requires a fresh record at this HEAD
