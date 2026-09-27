@@ -239,6 +239,9 @@ assert_eq "no-forge-cli" "$(guard_reason "$d")" "3. refuse unknown forge (no CLI
 d="$ROOT/t_green"; new_repo "$d"; assert_contains '"green"' "$(STUB_CI=success tick "$d")" "4. CI success → green"
 d="$ROOT/t_pend"; new_repo "$d";  assert_contains '"continue"' "$(STUB_CI=pending tick "$d")" "4. CI pending → continue"
 d="$ROOT/t_nomr"; new_repo "$d";  assert_contains '"no-mr"' "$(STUB_CI=failed STUB_MR_STATE=CLOSED tick "$d")" "4. no open MR → no-mr"
+out=$(STUB_CI=failed STUB_MR_ERR="HTTP 502" tick "$d")
+assert_contains '"continue"' "$out" "4. a forge error on the MR lookup → keep polling"
+assert_absent '"no-mr"' "$out" "4. a forge error on the MR lookup is never no-mr"
 
 # 5. tick: failed → needs-fix WITH the failing log, and READ-ONLY (no commit, HEAD unchanged)
 d="$ROOT/t_fail"; new_repo "$d"; before=$(count "$d" HEAD)
@@ -311,6 +314,14 @@ out=$(env PATH="$ROOT/blipbin:$PATH" python3 "$WATCH" run --repo "$d" 2>&1); rc=
 assert_absent 'no open merge request' "$out" "7a. a transient forge error never reads as a closed MR"
 assert_contains 'ok, all good' "$out" "7a. the watcher delivers the CI verdict after the blip"
 assert_eq 0 "$rc" "7a. green after the blip → exit 0"
+# 7a-bis. a forge that never answers ends the watch, bounded, without claiming a CI verdict
+d="$ROOT/mrdown"; new_repo "$d"
+printf '{"poll_interval":1,"watch_timeout":20}' > "$d/.mr-watchdog.json"
+out=$(STUB_CI=success STUB_MR_ERR="HTTP 502: Bad Gateway" python3 "$WATCH" run --repo "$d" 2>&1)
+assert_contains 'keeps failing' "$out" "7a-bis. a forge that never answers stops the watch"
+assert_contains 'not a CI verdict' "$out" "7a-bis. and says it is not a CI verdict"
+assert_absent 'ok, all good' "$out" "7a-bis. an unknown MR state never reads CI as a verdict"
+assert_absent 'no open merge request' "$out" "7a-bis. nor as a closed MR"
 # 7b. the verdict is bound to the WATCHED SHA — a stale branch-level red (previous run, fresh push)
 # must never produce a red verdict while this sha has no registered checks yet
 d="$ROOT/flip"; new_repo "$d"
