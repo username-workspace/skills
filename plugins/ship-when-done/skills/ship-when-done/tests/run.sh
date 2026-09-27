@@ -810,6 +810,11 @@ python3 -c 'import sys, importlib.util as u
 sp = u.spec_from_file_location("ship", sys.argv[1]); m = u.module_from_spec(sp); sp.loader.exec_module(m)
 m.handoff(sys.argv[2], "mr-watchdog-session.json", "need/n1", "s1")' "$SHIP" "$d"
 [ -f "$d/.git/swd-handoff.json" ] && ko "N. a later successful handoff clears the stale evidence" || ok "N. a later successful handoff clears the stale evidence"
+printf '{"v":1,"sessions":{},"script":["not","a","path"]}' > "$d/.git/mr-watchdog-session.json"
+out=$(python3 -c 'import sys, importlib.util as u
+sp = u.spec_from_file_location("ship", sys.argv[1]); m = u.module_from_spec(sp); sp.loader.exec_module(m)
+m.handoff(sys.argv[2], "mr-watchdog-session.json", "need/n1", "s1"); m.watchdog_handoff(sys.argv[2], "s1"); print("ok")' "$SHIP" "$d" 2>&1)
+assert_eq "ok" "$out" "N. a sibling presence file whose script is not a path is inert, never a traceback"
 printf 'import sys\nsys.exit(2)\n' > "$ROOT/oldreview.py"
 printf '{"v":1,"sessions":{},"script":"%s","prepush_gate":true}' "$ROOT/oldreview.py" > "$d/.git/merge-review-session.json"
 python3 -c 'import sys, importlib.util as u

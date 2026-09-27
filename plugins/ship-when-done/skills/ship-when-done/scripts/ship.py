@@ -786,7 +786,7 @@ def handoff(repo, fname, branch, session):
     the sibling's own `handoff` CLI, found at the script path its baseline stamped. Absent: inert."""
     presence = read_state(os.path.join(git_dir(repo), fname))
     script = presence.get("script") if isinstance(presence, dict) else None
-    if not script or not os.path.isfile(script):
+    if not isinstance(script, str) or not os.path.isfile(script):
         return
     try:
         r = subprocess.run([sys.executable, script, "handoff", "--repo", repo, "--session", session,
@@ -819,7 +819,7 @@ def watchdog_handoff(repo, session):
         script = json.load(open(os.path.join(git_dir(repo), "mr-watchdog-session.json"))).get("script")
     except Exception:
         return None
-    if not script or not os.path.isfile(script):
+    if not isinstance(script, str) or not os.path.isfile(script):
         return None
     for attempt in (0, 1):
         try:
