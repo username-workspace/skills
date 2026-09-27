@@ -51,7 +51,7 @@ python3 "${SKILL}" context --repo . --packet   # → context + materialized diff
 python3 "${SKILL}" prior   --repo .            # → the previous pass's state (score + findings) for §2bis
 ```
 
-The `diff_cmd` (and the packet's `diff`) may be an **incremental delta**: when a previous pass PASSED at a head that is an ancestor of HEAD, only the new commits need review. Only the *obligation* shrinks — the gate still requires a fresh record at the current HEAD.
+The `diff_cmd` (and the packet's `diff`) is taken against the merge target as last fetched (`origin/<default>` when it exists) and may be an **incremental delta**: when a previous pass PASSED at a head that is an ancestor of HEAD, only the new commits need review. The delta needs that pass to be recorded on this branch after `context` (which notes the base its diff was taken against), and that base to still be in the current base's history; a rewritten base, another branch, or a pass recorded without `context` means the full diff. Only the *obligation* shrinks — the gate still requires a fresh record at the current HEAD.
 
 **Fresh-eyes review for the first pass.** The context that wrote a diff scores it too gently; the first review of a diff runs in a clean-context subagent:
 

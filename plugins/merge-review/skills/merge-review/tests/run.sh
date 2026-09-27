@@ -27,7 +27,7 @@ d="$ROOT/ctx"; mkrepo "$d"; git -C "$d" checkout -q -b feat; work "$d"
 ctx=$(env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$d")
 case "$ctx" in *'"mode": "local"'*) ok "context local: mode=local";; *) ko "context local mode [$ctx]";; esac
 case "$ctx" in *'"base": "main"'*) ok "context: base detected (main)";; *) ko "context base";; esac
-case "$ctx" in *'git diff main...HEAD'*) ok "context: diff_cmd against base";; *) ko "context diff_cmd";; esac
+case "$ctx" in *'git diff origin/main...HEAD'*) ok "context: diff_cmd against the fetched merge target";; *) ko "context diff_cmd";; esac
 case "$ctx" in *'"threshold": 80'*) ok "context: default threshold 80";; *) ko "context threshold";; esac
 case "$ctx" in *'feat: work'*) ok "context: commits listed";; *) ko "context commits";; esac
 
@@ -154,6 +154,7 @@ case "$(env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$t")" in *'"thresho
 inc="$ROOT/inc"; mkrepo "$inc"; git -C "$inc" checkout -q -b feat
 "$PY" "$RV" baseline --repo "$inc" --session s1
 work "$inc"
+env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$inc" >/dev/null
 "$PY" "$RV" record --repo "$inc" --session s1 --score 90 --passed >/dev/null
 h1=$(git -C "$inc" rev-parse HEAD)
 echo more > "$inc/more.txt"; git -C "$inc" add -A; git -C "$inc" commit -qm more
@@ -166,7 +167,41 @@ inc2="$ROOT/inc2"; mkrepo "$inc2"; git -C "$inc2" checkout -q -b feat; work "$in
 "$PY" "$RV" record --repo "$inc2" --session s1 --score 90 --passed >/dev/null
 git -C "$inc2" commit -q --amend -m "amended away"
 case "$(env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$inc2")" in
-  *'"diff_cmd": "git diff main...HEAD"'*) ok "incremental: non-ancestor pass → full diff again";; *) ko "incremental: non-ancestor pass → full diff again";; esac
+  *'"diff_cmd": "git diff origin/main...HEAD"'*) ok "incremental: non-ancestor pass → full diff again";; *) ko "incremental: non-ancestor pass → full diff again";; esac
+packet_diff(){ env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$1" --packet | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["diff"])'; }
+obligation_cmd(){ env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$1" | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["diff_cmd"])'; }
+approve(){ env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$1" >/dev/null; "$PY" "$RV" record --repo "$1" --session s1 --score 90 --passed >/dev/null; }
+legacy="$ROOT/inc-legacy"; mkrepo "$legacy"; git -C "$legacy" checkout -q -b feat; work "$legacy"
+"$PY" "$RV" record --repo "$legacy" --session s1 --score 90 --passed >/dev/null; work "$legacy"
+assert_eq "git diff origin/main...HEAD" "$(obligation_cmd "$legacy")" "incremental: a pass recorded without the base it saw never shrinks the review"
+other="$ROOT/inc-other"; mkrepo "$other"; git -C "$other" checkout -q -b feat; work "$other"; approve "$other"
+git -C "$other" checkout -q -b feat2; work "$other"
+assert_eq "git diff origin/main...HEAD" "$(obligation_cmd "$other")" "incremental: a pass on another branch never shrinks this one's review"
+for how in local fetched stale; do
+  rw="$ROOT/inc-dropped-$how"; mkrepo "$rw"
+  echo "SECRET=1" > "$rw/config.env"; git -C "$rw" add -A; git -C "$rw" commit -qm "main: oops"; git -C "$rw" push -q origin main 2>/dev/null
+  git -C "$rw" checkout -q -b feat; work "$rw"; approve "$rw"
+  git -C "$rw" checkout -q -b rewritten main~1; echo n > "$rw/n.txt"; git -C "$rw" add -A; git -C "$rw" commit -qm "main: next"
+  git -C "$rw" push -q -f origin rewritten:main 2>/dev/null; git -C "$rw" fetch -q origin
+  [ "$how" = local ] && git -C "$rw" branch -q -f main rewritten
+  git -C "$rw" checkout -q feat
+  if [ "$how" = stale ]; then git -C "$rw" rebase -q origin/main; else git -C "$rw" merge -q --no-edit origin/main; fi
+  assert_contains "+SECRET=1" "$(packet_diff "$rw")" "incremental: a commit the base dropped after the approval is reviewed ($how)"
+done
+race="$ROOT/inc-race"; mkrepo "$race"
+echo "SECRET=1" > "$race/config.env"; git -C "$race" add -A; git -C "$race" commit -qm "main: oops"; git -C "$race" push -q origin main 2>/dev/null
+git -C "$race" checkout -q -b feat; work "$race"
+env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$race" >/dev/null
+git -C "$race" checkout -q -b rewritten main~1; echo n > "$race/n.txt"; git -C "$race" add -A; git -C "$race" commit -qm "main: next"
+git -C "$race" push -q -f origin rewritten:main 2>/dev/null; git -C "$race" fetch -q origin; git -C "$race" checkout -q feat
+"$PY" "$RV" record --repo "$race" --session s1 --score 90 --passed >/dev/null
+git -C "$race" merge -q --no-edit origin/main
+assert_contains "+SECRET=1" "$(packet_diff "$race")" "incremental: a base rewritten during the review never widens the approval"
+enc="$ROOT/inc-latin1"; mkrepo "$enc"; git -C "$enc" checkout -q -b feat
+printf 'label = "caf\351"\n' > "$enc/legacy.php"; git -C "$enc" add -A; git -C "$enc" commit -qm "feat: legacy"
+out=$(env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$enc" --packet 2>&1); rc=$?
+assert_eq 0 "$rc" "packet: a non-UTF-8 file never breaks the review packet"
+assert_contains "legacy.php" "$out" "packet: and the file is still in the diff"
 
 # --- 6b. SECURITY: gate-evasion knobs are never honored from the cloneable tree file -------------
 sv="$ROOT/sec-knobs"; mkrepo "$sv"; git -C "$sv" checkout -q -b feat
