@@ -550,10 +550,27 @@ unset CRS_ENV_CAP CRS_ARGV_CAP; run stop toplevel >/dev/null 2>&1 || true
 ( exec -a "claude --remote-control decoy48 -n decoy48" sleep 30 ) & namesake=$!
 set -m; sleep 30 & stranger=$!; set +m
 printf 'name=decoy48\ncwd=/tmp\nstarted=x\nsubshell=%s\npgid=%s\nleader_start=Thu Jan  1 00:00:00 1970\n' "$stranger" "$stranger" > "$STATE/decoy48.spawn"
-run stop decoy48 >/dev/null 2>&1; sleep 0.3
+out48=$(run stop decoy48 2>&1); sleep 0.3
+assert_contains "nothing killed" "$out48" "48. a stop that kills nothing says so"
 kill -0 "$stranger" 2>/dev/null && ok "48. a process group recycled by the OS is never killed" || ko "48. a process group recycled by the OS is never killed"
 kill -0 "$namesake" 2>/dev/null && ok "48. a namesake session outside the recorded group is never killed" || ko "48. a namesake session outside the recorded group is never killed"
 kill "$stranger" "$namesake" 2>/dev/null; wait "$stranger" "$namesake" 2>/dev/null
+# 49. stop recognises its session whatever the caller's locale or time zone
+out=$(LANG=fr_FR.UTF-8 LC_ALL=fr_FR.UTF-8 TZ=Pacific/Auckland run spawn locale49); h49="$(echo "$out" | head -1)"
+for _ in $(seq 1 50); do [ -s "$STATE/$h49.spawn" ] && break; sleep 0.1; done
+pg49="$(sed -n 's/^pgid=//p' "$STATE/$h49.spawn" 2>/dev/null | head -1)"; sleep 0.3
+LANG=C LC_ALL=C TZ=UTC run stop "$h49" >/dev/null 2>&1; sleep 0.3
+ps -A -o pgid=,stat= | awk -v g="$pg49" '$1==g && $2 !~ /^Z/' | grep -q . && ko "49. a stop from another locale and time zone still kills the session" || ok "49. a stop from another locale and time zone still kills the session"
+# 50. stop ends a window session's claude and lets its launcher close the tab
+printf '#!/usr/bin/env bash\necho $$ > "%s"\nexec sleep 30\n' "$ROOT/win50.pid" > "$ROOT/bin/claude-sleep"; chmod +x "$ROOT/bin/claude-sleep"
+: > "$ROOT/osascript.cap"; rm -f "$ROOT/win50.pid"
+out=$(CRS_CLAUDE_BIN="$ROOT/bin/claude-sleep" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" TERM_PROGRAM=iTerm.app bash "$DRIVER" open win50 2>&1)
+bash "$STATE/win50.cmd" >/dev/null 2>&1 & launcher50=$!
+for _ in $(seq 1 50); do [ -s "$ROOT/win50.pid" ] && break; sleep 0.1; done; claude50="$(cat "$ROOT/win50.pid" 2>/dev/null)"
+run stop win50 >/dev/null 2>&1; sleep 0.5
+{ [ -n "$claude50" ] && ! kill -0 "$claude50" 2>/dev/null; } && ok "50. stop ends a window session's claude" || ko "50. stop ends a window session's claude (pid=$claude50)"
+kill -0 "$launcher50" 2>/dev/null && ko "50. the launcher regains control and exits (closing its tab)" || ok "50. the launcher regains control and exits (closing its tab)"
+[ -n "$claude50" ] && kill "$claude50" 2>/dev/null; kill "$launcher50" 2>/dev/null; wait "$launcher50" 2>/dev/null
 echo
 echo "PASS=$PASS FAIL=$FAIL"
 rm -rf "$ROOT"
