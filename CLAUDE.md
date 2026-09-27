@@ -68,7 +68,7 @@ Hermetic tests idealize composition, environment, time, and state evolution. Two
   on its PR/MR) against the real sandbox forges `username-workspace/harness-e2e` on github.com, and on
   gitlab.com with `--forge gitlab` (branch + MR pipelines; the ledger keeps one proof per forge). Plan-steered CI,
   real pushes, PRs/MRs, checks/pipelines and registration windows. Self-healing: stale `e2e/*`
-  branches/PRs are garbage-collected, each failure is retried once to classify flake vs defect, and
+  and `need/*` branches/PRs are garbage-collected, each failure is retried once to classify flake vs defect, and
   persistent failures file a labelled issue on this repo with the reproduction command. Run it
   deliberately (release, harness change); it is excluded from CI.
 - **The coverage ledger** — every passing situation is recorded in `tests/e2e/coverage.json` with the

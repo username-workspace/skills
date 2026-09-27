@@ -375,7 +375,7 @@ assert_eq "yes" "$(env -u HARNESS_AUTO_ENGAGE python3 "$REVIEW" engaged --repo "
 # --- 16. E2E ledger staleness tracks the plugins the lane exercises, not the whole marketplace -------
 dL="$ROOT/ledger"; new_repo "$dL"
 mkdir -p "$dL/tests/e2e" "$dL/plugins/ship-when-done" "$dL/plugins/claude-remote-spawn" \
-  "$dL/plugins/proof-of-fix" "$dL/lib"
+  "$dL/plugins/proof-of-fix" "$dL/plugins/delivery-conductor" "$dL/lib"
 cp "$REPO_ROOT/tests/e2e/e2e.py" "$dL/tests/e2e/"
 touch "$dL/plugins/ship-when-done/a"; git -C "$dL" add -A; git -C "$dL" commit -qm harness
 harness_sha=$(git -C "$dL" rev-parse --short HEAD)
@@ -384,6 +384,8 @@ touch "$dL/plugins/claude-remote-spawn/b"; git -C "$dL" add -A; git -C "$dL" com
 assert_eq "$harness_sha" "$(ledger_rev)" "16. a commit to a plugin the lane never runs leaves every proof fresh"
 touch "$dL/plugins/proof-of-fix/c"; git -C "$dL" add -A; git -C "$dL" commit -qm pof
 assert_eq "$(git -C "$dL" rev-parse --short HEAD)" "$(ledger_rev)" "16. proof-of-fix runs in the needs space: a change there makes the ledger stale"
+touch "$dL/plugins/delivery-conductor/d"; git -C "$dL" add -A; git -C "$dL" commit -qm conductor
+assert_eq "$(git -C "$dL" rev-parse --short HEAD)" "$(ledger_rev)" "16. so does the conductor that drives it"
 touch "$dL/lib/_kernel.py"; git -C "$dL" add -A; git -C "$dL" commit -qm kernel
 assert_eq "$(git -C "$dL" rev-parse --short HEAD)" "$(ledger_rev)" "16. a kernel change makes the ledger stale"
 fill_labels(){ python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import e2e

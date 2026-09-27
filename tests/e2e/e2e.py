@@ -7,11 +7,11 @@ reproducible) on a disposable sandbox repo with plan-steered CI — real pushes,
 real registration windows.
 
 Watcher duties: every scenario failure is re-run once with the same seed (flake vs defect); the sandbox
-is self-healed before each run (stale e2e/* branches and PRs are garbage-collected); a persistent
+is self-healed before each run (stale e2e/* and need/* branches and PRs are garbage-collected); a persistent
 failure files a GitHub issue on the skills repo carrying the full evidence, ready for a fixing session.
 
 Usage: python3 tests/e2e/e2e.py [--forge github|gitlab] [--seed N] [--count N] [--repo owner/name]
-                               [--scenario flow:gate:ci]
+                               [--scenario flow:gate:ci | twist:<name> | need:<name>]
 """
 import argparse, json, os, random, re, shutil, subprocess, sys, tempfile, time
 from urllib.parse import quote
@@ -568,13 +568,42 @@ TWISTS = {
 
 # --- needs: delivery-conductor drives a stated need to a ready PR/MR; this driver plays the model -----
 
-def conductor_stop(repo, session):
-    payload = json.dumps({"cwd": repo, "session_id": session, "prompt_id": "e2e", "transcript_path": "",
-                          "stop_hook_active": False, "background_tasks": []})
-    p = subprocess.run([sys.executable, CONDUCTOR, "hook", "--event", "stop"], input=payload,
-                       capture_output=True, text=True, timeout=600)
+def conductor_hook(event, payload):
+    """The conductor's hook as Claude Code runs it; an error, a traceback or unparseable output fails the
+    scenario with the hook's full output, never reads as a silent hook."""
+    p = subprocess.run([sys.executable, CONDUCTOR, "hook", "--event", event], input=json.dumps(payload),
+                       capture_output=True, text=True, timeout=300)
     out = p.stdout.strip()
-    return json.loads(out).get("reason", "") if out else ""
+    try:
+        reply = json.loads(out) if out else {}
+    except ValueError:
+        reply = None
+    expect(p.returncode == 0 and not p.stderr.strip() and isinstance(reply, dict) and "systemMessage" not in reply,
+           f"the conductor's {event} hook answers cleanly",
+           f"rc={p.returncode}\nstdout:\n{out[-2000:]}\nstderr:\n{p.stderr[-2000:]}")
+    return reply
+
+
+def conductor_stop(repo, session):
+    return conductor_hook("stop", {"cwd": repo, "session_id": session, "prompt_id": "e2e", "transcript_path": "",
+                                   "stop_hook_active": False, "background_tasks": []}).get("reason", "")
+
+
+def conductor_prompt(repo, session, prompt_id, prompt):
+    reply = conductor_hook("prompt", {"cwd": repo, "session_id": session, "prompt_id": prompt_id,
+                                      "prompt": prompt, "transcript_path": ""})
+    return (reply.get("hookSpecificOutput") or {}).get("additionalContext", "")
+
+
+def conductor_cli(what, *argv):
+    rc, out, err = sh([sys.executable, CONDUCTOR, *argv])
+    expect(rc == 0, what, out + err)
+    return json.loads(out)
+
+
+def remote_head(workdir, branch):
+    _, out, _ = sh(["git", "-C", workdir, "ls-remote", "origin", f"refs/heads/{branch}"], check=True)
+    return out.split()[0] if out else ""
 
 
 def open_need(tag, name):
@@ -582,30 +611,34 @@ def open_need(tag, name):
     clone(workdir)
     json.dump({"gate": "true"}, open(os.path.join(workdir, ".git", "ship-when-done.json"), "w"))
     session = f"e2e-{tag}"
-    rc, out, err = sh([sys.executable, CONDUCTOR, "open", "--repo", workdir, "--session", session,
-                       "--summary", f"e2e need {name}", "--type", "feat",
-                       "--criterion", f"{name}.txt exists", "--prompt", f"E2E need {name} ({tag})"])
-    expect(rc == 0, "the conductor must open the need", out + err)
-    return workdir, session, json.loads(out)["branch"]
+    need = conductor_cli("the conductor opens the need", "open", "--repo", workdir, "--session", session,
+                         "--summary", f"e2e need {name}", "--type", "feat", "--criterion", f"{name}.txt exists",
+                         "--prompt", f"E2E need {name} ({tag})")
+    return workdir, session, need["branch"]
 
 
-def drive(workdir, session, name, turns=20):
-    """Do what each conductor instruction names, as the model would, until the need is ready."""
+def drive(workdir, session, name, implement=True, turns=20):
+    """Do what each conductor instruction names, as the model would, until the need is ready. The need is
+    implemented once, and only when `implement`; anything else the conductor says (a blocked need, a
+    second request to implement, a silent Stop) fails with its full text."""
     for _ in range(turns):
         why = conductor_stop(workdir, session)
+        cmd = re.search(r"`([^`]+)`", why)
         if why.startswith("[conductor] Need ready"):
             return why
-        cmd = re.search(r"`([^`]+)`", why)
-        if "Implement need" in why:
+        if why.startswith("[conductor] Implement need") and implement:
+            implement = False
             work(workdir, name, "green")
             open(os.path.join(workdir, ".mr-watchdog.json"), "w").write('{"poll_interval": 1}')
-        elif "run_in_background" in why and cmd:
-            sh(cmd.group(1), timeout=900)
-        elif "merge-review" in why:
-            _, head, _ = sh(["git", "-C", workdir, "rev-parse", "HEAD"], check=True)
-            sh([sys.executable, REVIEW, "record", "--repo", workdir, "--sha", head, "--score", "95"], check=True)
+        elif why.startswith("[conductor] Launch this with run_in_background") and cmd:
+            rc, out, err = sh(cmd.group(1), timeout=900)
+            expect(rc == 0, f"the background step `{cmd.group(1)}` succeeds", out + err)
+        elif why.startswith("[conductor] Review HEAD") and cmd:
+            record = cmd.group(1).replace("<N>", "95").replace("'<JSON list of the findings still open>'", "'[]'")
+            rc, out, err = sh(record)
+            expect(rc == 0, "the review command the conductor names records the verdict", out + err)
         else:
-            raise Failure(f"unexpected conductor instruction:\n{why[-2000:]}")
+            raise Failure(f"unexpected conductor instruction:\n{why[-2000:] or '(a silent Stop)'}")
     raise Failure(f"the need never reached ready in {turns} Stops")
 
 
@@ -618,42 +651,47 @@ def finish(branch):
 def need_ready(tag):
     workdir, session, branch = open_need(tag, "ready")
     report = drive(workdir, session, "ready")
-    expect("ci:" in report, "the ready report carries the CI evidence", report)
+    ci = next((line for line in report.splitlines() if line.startswith("ci: ")), "")
+    head = remote_head(workdir, branch)
+    expect(head and f'"sha": "{head}"' in ci and '"verdict": "green"' in ci,
+           "the ready report carries a green CI verdict at the pushed head", f"remote {head}\n{report}")
     finish(branch)
 
 
 def need_halt_resume(tag):
     workdir, session, branch = open_need(tag, "halt")
-    expect("Implement need" in conductor_stop(workdir, session), "a fresh need asks for its implementation")
+    expect(conductor_stop(workdir, session).startswith("[conductor] Implement need"),
+           "a fresh need asks for its implementation")
     work(workdir, "halt", "green")
-    sh([sys.executable, CONDUCTOR, "halt", "--repo", workdir, "--session", session], check=True)
+    halted = conductor_cli("halt blocks the need", "halt", "--repo", workdir, "--session", session)
+    expect(halted.get("work_committed") is True, "halt commits the need's work on its held branch", json.dumps(halted))
+    _, head, _ = sh(["git", "-C", workdir, "rev-parse", "HEAD"], check=True)
     expect(conductor_stop(workdir, session) == "", "a halted need is silent at Stop")
-    expect(pr_state(branch) is None, "a halted need ships nothing")
-    sh([sys.executable, CONDUCTOR, "resume", "--repo", workdir, "--session", session], check=True)
-    drive(workdir, session, "halt")
+    conductor_cli("resume re-arms the need", "resume", "--repo", workdir, "--session", session)
+    drive(workdir, session, "halt", implement=False)
+    expect(remote_head(workdir, branch) == head, "the work halt committed is what ships, never redone",
+           f"halted at {head}, shipped {remote_head(workdir, branch)}")
     finish(branch)
-
-
-def conductor_prompt(repo, session, prompt_id, prompt):
-    payload = json.dumps({"cwd": repo, "session_id": session, "prompt_id": prompt_id, "prompt": prompt,
-                          "transcript_path": ""})
-    return subprocess.run([sys.executable, CONDUCTOR, "hook", "--event", "prompt"], input=payload,
-                          capture_output=True, text=True, timeout=60).stdout
 
 
 def need_follow_up(tag):
     workdir, session, branch = open_need(tag, "follow")
     drive(workdir, session, "follow")
+    first, pr = remote_head(workdir, branch), pr_state(branch)
     nudge = conductor_prompt(workdir, session, f"{tag}-follow-up", "in that PR, also add follow-up.txt")
     expect(" reopen " in nudge, "a prompt on a ready need's branch offers to reopen that need", nudge)
-    rc, out, err = sh([sys.executable, CONDUCTOR, "reopen", "--repo", workdir, "--session", session,
-                       "--need", branch.split("/", 1)[1]])
-    expect(rc == 0, "a ready need reopens on its branch", out + err)
+    conductor_cli("a ready need reopens on its branch", "reopen", "--repo", workdir, "--session", session,
+                  "--need", branch.split("/", 1)[1])
     work(workdir, "follow-up", "green")
-    drive(workdir, session, "follow")
-    _, head, _ = sh(["git", "-C", workdir, "rev-parse", "HEAD"], check=True)
-    _, remote, _ = sh(["git", "-C", workdir, "ls-remote", "origin", branch], check=True)
-    expect(remote.startswith(head), "the follow-up ships on the same PR/MR, at its head", remote)
+    drive(workdir, session, "follow", implement=False)
+    shipped = remote_head(workdir, branch)
+    sh(["git", "-C", workdir, "fetch", "-q", "origin", branch], check=True)
+    rc, _, _ = sh(["git", "-C", workdir, "cat-file", "-e", "FETCH_HEAD:follow-up.txt"])
+    expect(shipped != first and rc == 0, "the follow-up ships on the need's branch, at a new head",
+           f"first ready at {first}, now {shipped}, follow-up.txt shipped: {rc == 0}")
+    after = pr_state(branch)
+    expect(pr and after and after["number"] == pr["number"], "the follow-up ships on the same PR/MR",
+           json.dumps([pr, after]))
     finish(branch)
 
 
@@ -710,7 +748,7 @@ def main():
     ap.add_argument("--repo", default=E2E_REPO)
     ap.add_argument("--forge", choices=("github", "gitlab"), default="github",
                     help="which sandbox forge to run against (the ledger keeps one proof per forge)")
-    ap.add_argument("--scenario", help="one-off flow:gate:ci[:project] or twist:<name>")
+    ap.add_argument("--scenario", help="one-off flow:gate:ci[:project], twist:<name> or need:<name>")
     ap.add_argument("--projects", action="store_true",
                     help="full-integration suite over the project archetypes (auto-detected gates)")
     ap.add_argument("--twists", action="store_true",
