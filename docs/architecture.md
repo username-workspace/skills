@@ -227,8 +227,10 @@ file exists whenever it is enabled, and only its `prepush_gate` flag arms ship-w
 
 ### The conductor
 
-`delivery-conductor` owns no stage. A need opens on its own branch, cut from the base (`conductor.py
-open`: the prompt the hook captured, a summary and criteria; one need per worktree), and lives in
+`delivery-conductor` owns no stage. A need opens on its own branch, cut from the base its owners
+measure against (the default branch of the remote a branch with no upstream ships to, as last fetched;
+`conductor.py open`: the prompt the hook captured for that turn, a summary and criteria; one need per
+worktree), and lives in
 `.git/conductor.json` while that branch is driven. At every Stop
 the conductor asks the owners' `stage` CLIs, in the order of the table above, and acts on the first
 stage that is not done: a `script` step runs inside the hook (several can chain within its time
@@ -241,8 +243,10 @@ the need advances; compaction and `/clear` re-bind the need to the same Claude p
 A need is blocked, and the user told once, on the same blocking decision three times with no change in
 work state, on a stage failing too many times in a row (three reviews, six otherwise; the stage being
 done resets it), or past eight hours of driven time (`resume` restarts the clock). A blocked or
-abandoned need keeps its branch held (driven) until `resume` or `release`; `release` and `ready` hand the
-branch back at the next prompt, so no sibling speaks in the deciding turn.
+abandoned need keeps its branch held (driven) until `resume` or `release`; `release` and `ready` hold
+the branch through the rest of the deciding prompt only (`need_holds()`, whatever the session's scope),
+so no sibling speaks in that turn. The ledger then keeps the need whole in its history: a follow-up on a
+`ready` need (review comments, a change to its PR/MR) reopens it on its branch (`conductor.py reopen`).
 
 ## 6. Engagement modes
 

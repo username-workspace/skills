@@ -63,9 +63,20 @@ def remote_name(repo):
     rc, up, _ = run(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], repo)
     if rc == 0 and "/" in up:
         return up.split("/", 1)[0]
+    return default_remote(repo)
+
+
+def default_remote(repo):
+    """Where a branch with no upstream is pushed: origin, else the first remote."""
     _, remotes, _ = run(["git", "remote"], repo)
     rl = [r for r in remotes.splitlines() if r.strip()]
     return ("origin" if "origin" in rl else rl[0]) if rl else None
+
+
+def base_ref(repo, remote, base):
+    """The merge target as last fetched: the remote-tracking branch when there is one."""
+    rc = run(["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/{remote}/{base}"], repo)[0] if remote else 1
+    return f"{remote}/{base}" if rc == 0 else base
 
 
 def default_branch(repo, remote):
@@ -423,7 +434,16 @@ def driven(repo, session, prompt_id):
     if status != "ok":
         return status == "corrupt"
     branch = cur_branch(repo)
-    return bool(branch) and any(n.get("branch") == branch for n in ledger["needs"].values())
+    return bool(branch) and any(n.get("branch") == branch and need_holds(n, prompt_id)
+                                for n in ledger["needs"].values())
+
+
+NEED_CLOSED = ("ready", "released")
+
+
+def need_holds(need, prompt_id):
+    """A need holds its branch until it is closed, and through the rest of the prompt that closed it."""
+    return need.get("state") not in NEED_CLOSED or need.get("closed_prompt") == prompt_id
 
 
 def provenance_path(repo):

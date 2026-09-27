@@ -152,9 +152,9 @@ python3 scripts/ship.py engage --goal "<ticket/prompt>"         # full flow (opt
 
 ## When driven
 
-While a delivery-conductor need drives the branch, this plugin's hooks stand down and the conductor runs
-its owner steps (`commit`, `gate`, `mark-done`, `push`, `open-pr`, `mark-ready`) itself. Do not declare
-`mark-done` or ship by hand on a driven branch.
+While a delivery-conductor need drives the branch, this plugin's hooks stand down. The conductor runs
+the owner steps `commit`, `mark-done`, `push`, `open-pr` and `mark-ready` itself, and hands `gate` back
+as a command to launch in the background. Do not declare `mark-done` or ship by hand on a driven branch.
 
 ## Stage protocol (delivery-conductor)
 

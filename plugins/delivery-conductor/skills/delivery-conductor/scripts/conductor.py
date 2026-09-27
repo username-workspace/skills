@@ -5,16 +5,17 @@ step it runs or instructs is the owner's (ship-when-done, proof-of-fix, merge-re
 
 A need lives in the ledger `.git/conductor.json` while its branch is driven (active, blocked or
 abandoned); the kernel's driven() makes every sibling stand down on that branch while this plugin's
-hooks run. Reaching `ready`, or `release`, takes the need out of the ledger."""
+hooks run. A need that reaches `ready`, or is released, holds its branch through the rest of that
+prompt, then moves to the ledger's history, where a follow-up can reopen it."""
 import argparse, fcntl, hashlib, json, os, shlex, subprocess, sys, time, uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _kernel
-from _kernel import (auto_engage, cur_branch, default_branch, git_dir, head_sha, is_machine_prompt,
-                     ledger_path, live_path, read_ledger, read_state, remote_name, repo_root,
-                     resolve_repo, run, stamp_live, write_state)
+from _kernel import (NEED_CLOSED, auto_engage, base_ref, cur_branch, default_branch, default_remote, git_dir,
+                     head_sha, is_machine_prompt, ledger_path, live_path, need_holds, read_ledger, read_state,
+                     repo_root, resolve_repo, run, stamp_live, write_state)
 
 STAGES = (("implementing", "ship-when-done"), ("gating", "ship-when-done"), ("proving", "proof-of-fix"),
           ("reviewing", "merge-review"), ("shipping", "ship-when-done"), ("ci", "mr-watchdog"),
@@ -77,11 +78,8 @@ def identity(args):
     return session, pid, prompt
 
 
-LIVE = ("active", "blocked", "abandoned")
-
-
 def live(ledger):
-    return [n for n in ledger["needs"].values() if n.get("state") in LIVE]
+    return [n for n in ledger["needs"].values() if n.get("state") not in NEED_CLOSED]
 
 
 def bound(ledger, session):
@@ -96,14 +94,18 @@ def captured_path(session):
     return live_path(session)[:-len(".json")] + ".prompt.json"
 
 
+def captured_prompt(session, prompt):
+    """The human prompt that started this very turn, as the prompt hook captured it."""
+    captured = read_state(captured_path(session)) or {}
+    return (captured.get("prompt") or "") if prompt and captured.get("prompt_id") == prompt else ""
+
+
 def purge(ledger, prompt_id):
-    """A need that reached ready, or was released, stops being driven at the next prompt: its branch stays
-    held through the rest of the deciding prompt, so no sibling speaks in that turn."""
-    for nid, n in list(ledger["needs"].items()):
-        if n.get("state") not in LIVE and n.get("closed_prompt") != prompt_id:
-            ledger["history"] = (ledger.get("history") or [])[-(HISTORY - 1):] + [
-                {k: n.get(k) for k in ("id", "branch", "summary", "state", "created", "updated")}]
-            del ledger["needs"][nid]
+    """Moves every need that no longer holds its branch to the history, whole, so a follow-up can reopen it."""
+    gone = [nid for nid, n in ledger["needs"].items() if not need_holds(n, prompt_id)]
+    for nid in gone:
+        ledger["history"] = (ledger.get("history") or [])[-(HISTORY - 1):] + [ledger["needs"].pop(nid)]
+    return bool(gone)
 
 
 # --- the owner CLIs -----------------------------------------------------------------------------------
@@ -140,13 +142,13 @@ def run_step(repo, argv):
     return r.returncode == 0, (r.stdout + r.stderr).strip()[-1500:]
 
 
-# --- open / halt / resume / abandon / release / adopt / note -------------------------------------------
+# --- open / reopen / halt / resume / abandon / release / adopt / note ----------------------------------
 
-def cmd_open(args):
-    repo = repo_root(args.repo)
+def drivable(repo, args):
+    """(session, pid, prompt id, remote) when this worktree can take a need, else a refusal."""
     session, pid, prompt = identity(args)
     if not session:
-        raise SystemExit("[conductor] ✗ open needs the session id (CLAUDE_CODE_SESSION_ID or --session)")
+        raise SystemExit("[conductor] ✗ a need is bound to its session: CLAUDE_CODE_SESSION_ID or --session")
     if not auto_engage(repo):
         raise SystemExit("[conductor] ✗ this repo is outside the AUTO scope (HARNESS_AUTO_ENGAGE, "
                          "HARNESS_AUTO_ENGAGE_EXCLUDE): the conductor does not drive here")
@@ -154,29 +156,37 @@ def cmd_open(args):
     if missing:
         raise SystemExit(f"[conductor] ✗ cannot drive: {', '.join(missing)} not found. Every stage owner must "
                          "be installed and enabled, or a need would skip its evidence.")
-    if not remote_name(repo):
+    remote = default_remote(repo)
+    if not remote:
         raise SystemExit("[conductor] ✗ cannot drive: the repo has no remote to ship to")
     _, dirty, _ = run(["git", "status", "--porcelain"], repo)
     if dirty and not args.adopt_changes:
         raise SystemExit("[conductor] ✗ the working tree holds changes this need did not produce; commit or "
                          "stash them, or pass --adopt-changes to carry them into the need")
-    remote = remote_name(repo)
-    base = default_branch(repo, remote)
-    base_ref = f"{remote}/{base}" if run(["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/{remote}/{base}"], repo)[0] == 0 else base
-    captured = read_state(captured_path(session)) or {}
+    return session, pid, prompt, remote
+
+
+def refuse_held(ledger):
+    held = live(ledger)
+    if held:
+        raise SystemExit(f"[conductor] ✗ need {held[0]['id']} ({held[0]['state']}) holds this worktree: finish or "
+                         "release it, or open the new need in another worktree")
+
+
+def cmd_open(args):
+    repo = repo_root(args.repo)
+    session, pid, prompt, remote = drivable(repo, args)
+    base = base_ref(repo, remote, default_branch(repo, remote))
     with ledger_lock(repo):
         ledger = load(repo)
-        held = live(ledger)
-        if held:
-            raise SystemExit(f"[conductor] ✗ need {held[0]['id']} ({held[0]['state']}) holds this worktree: finish or "
-                             "release it, or open the new need in another worktree")
+        refuse_held(ledger)
         nid = time.strftime("%y%m%d") + uuid.uuid4().hex[:4]
         branch = f"need/{nid}"
-        rc, _, err = run(["git", "checkout", "-q", "-b", branch, base_ref], repo)
+        rc, _, err = run(["git", "checkout", "-q", "--no-track", "-b", branch, base], repo)
         if rc != 0:
-            raise SystemExit(f"[conductor] ✗ could not create {branch} from {base_ref}: {err}")
-        need = {"id": nid, "branch": branch, "base": base_ref, "state": "active", "summary": args.summary[:72],
-                "type": args.type, "prompt": (args.prompt or captured.get("prompt") or "")[:4000],
+            raise SystemExit(f"[conductor] ✗ could not create {branch} from {base}: {err}")
+        need = {"id": nid, "branch": branch, "base": base, "state": "active", "summary": args.summary[:72],
+                "type": args.type, "prompt": (args.prompt or captured_prompt(session, prompt))[:4000],
                 "criteria": args.criterion or [], "session": session, "sessions": [session], "pid": pid,
                 "prompt_id": prompt, "created": now(), "clock": now(), "updated": now(),
                 "attempts": {}, "stall": {"key": "", "count": 0}}
@@ -186,12 +196,38 @@ def cmd_open(args):
                       "conductor commits, gates, proves, reviews, ships and watches CI"}))
 
 
+def cmd_reopen(args):
+    repo = repo_root(args.repo)
+    session, pid, prompt, _ = drivable(repo, args)
+    with ledger_lock(repo):
+        ledger = load(repo)
+        refuse_held(ledger)
+        history = ledger.get("history") or []
+        need = next((n for n in reversed(history) if n.get("id") == args.need and n.get("state") == "ready"), None)
+        if not need:
+            raise SystemExit(f"[conductor] ✗ no need {args.need} reached ready in this worktree")
+        rc, _, err = run(["git", "checkout", "-q", need["branch"]], repo)
+        if rc != 0:
+            raise SystemExit(f"[conductor] ✗ could not check out {need['branch']}: {err}")
+        history.remove(need)
+        need.pop("closed_prompt", None)
+        need.update(state="active", reason="", reported=False, session=session, pid=pid, prompt_id=prompt,
+                    prompt=(captured_prompt(session, prompt) or need.get("prompt") or "")[:4000],
+                    attempts={}, stall={"key": "", "count": 0}, clock=now(), updated=now())
+        need["sessions"] = list(dict.fromkeys((need.get("sessions") or []) + [session]))
+        ledger["needs"][need["id"]] = need
+        save(repo, ledger)
+    print(json.dumps({"need": need["id"], "branch": need["branch"], "next": "implement the follow-up, then end "
+                      "your turn: the conductor commits it on the need's branch and drives it to ready again"}))
+
+
 def change(args, fn):
     repo = repo_root(args.repo)
     session, _, prompt = identity(args)
     with ledger_lock(repo):
         ledger = load(repo)
-        need = ledger["needs"].get(args.need) if args.need else bound(ledger, session)
+        need = (next((n for n in live(ledger) if n["id"] == args.need), None) if args.need
+                else bound(ledger, session))
         if not need:
             raise SystemExit("[conductor] ✗ this session drives no need here (name one with --need to act on it)")
         out = fn(repo, ledger, need, prompt)
@@ -309,12 +345,16 @@ def hook_prompt(payload, repo, script):
         return None
     with ledger_lock(repo):
         ledger = load(repo)
-        purge(ledger, prompt_id)
+        changed = purge(ledger, prompt_id)
         need = None if is_machine_prompt(text) else bound(ledger, session)
         if need:
             need["pending_prompt"] = prompt_id
-        save(repo, ledger)
+        if need or changed:
+            save(repo, ledger)
         held = live(ledger)
+        branch = cur_branch(repo)
+        ready = next((n for n in reversed(ledger.get("history") or [])
+                      if n.get("state") == "ready" and n.get("branch") == branch), None)
     if is_machine_prompt(text):
         return None
     write_state(captured_path(session), {"prompt_id": prompt_id, "prompt": text[:4000]})
@@ -333,7 +373,10 @@ def hook_prompt(payload, repo, script):
         f"`{me} open {r} --summary '<imperative summary, 72 chars>' --type <feat|fix|...> "
         "--criterion '<an acceptance criterion and the probe that shows it>'` (the prompt itself is captured "
         "verbatim). The conductor then drives it to a ready PR/MR: implement, end your turn, and do the judgment "
-        "steps it names. Anything else (a question, an exploration): answer it, no need."))
+        "steps it names. Anything else (a question, an exploration): answer it, no need."
+        + (f" If it follows up on need {ready['id']} ({ready['summary']}), whose PR/MR is ready on this branch "
+           f"(review comments, a change to that PR/MR), reopen that need instead: `{me} reopen {r} --need "
+           f"{ready['id']}`." if ready else "")))
 
 
 def context(event, text):
@@ -452,7 +495,7 @@ def decide(repo, ledger, need, stage, decision, failure=False):
     need.update(stall=stall, attempts=attempts, updated=now())
     if stall["count"] >= STALL_LIMIT:
         return stop_need(repo, ledger, need, "blocked", f"no progress at stage {stage} after {STALL_LIMIT} tries")
-    if attempts.get(stage, 0) > STAGE_LIMITS.get(stage, STAGE_LIMIT):
+    if attempts.get(stage, 0) >= STAGE_LIMITS.get(stage, STAGE_LIMIT):
         return stop_need(repo, ledger, need, "blocked", f"stage {stage} used its {STAGE_LIMITS.get(stage, STAGE_LIMIT)} attempts")
     save(repo, ledger)
     return decision
@@ -501,6 +544,9 @@ def main():
     o.add_argument("--criterion", action="append")
     o.add_argument("--prompt", default="")
     o.add_argument("--adopt-changes", action="store_true")
+    r = common("reopen", cmd_reopen)
+    r.add_argument("--need", required=True)
+    r.add_argument("--adopt-changes", action="store_true")
     for name, fn in (("halt", cmd_halt), ("resume", cmd_resume), ("abandon", cmd_abandon),
                      ("release", cmd_release), ("adopt", cmd_adopt), ("note", cmd_note)):
         common(name, fn).add_argument("--need", default="")

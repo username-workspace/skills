@@ -40,8 +40,9 @@ python3 "${SKILL}" open --repo . --summary '<imperative summary>' --type feat \
   --criterion '<acceptance criterion and the probe that shows it>'
 ```
 
-The prompt itself is the one the UserPromptSubmit hook captured, verbatim. `open` creates `need/<id>` from
-the base (the fetched default branch), so no earlier work counts as the need's, and refuses a working tree
+The prompt itself is the one the UserPromptSubmit hook captured for this turn, verbatim. `open` creates
+`need/<id>` from the base (the default branch of the remote the need ships to, as last fetched), so no
+earlier work counts as the need's, and refuses a working tree
 with changes the need did not produce (`--adopt-changes` carries them in on purpose), a worktree another
 need still holds (one need per worktree: open the next one in another worktree), a repo outside the AUTO
 scope, a repo without a remote, and a repo where a stage owner is missing. For a bug, record the failing repro with proof-of-fix
@@ -64,6 +65,10 @@ take effect at the next prompt, so no sibling speaks in the deciding turn. `adop
 need to the current session on purpose. A new, unrelated need waits until the current one is ready or
 released.
 
+A follow-up on a need that reached `ready` (review comments, a change to its PR/MR) reopens it on its
+branch instead of opening a new one: the prompt hook offers `reopen --need <id>` while the worktree is on
+that branch. Then implement the follow-up and end your turn; the conductor drives it to ready again.
+
 ## Breakers
 
 A need is blocked, and the user told once, when the same blocking decision comes back three times with
@@ -79,6 +84,6 @@ again, exactly as for a shell step carrying `--need <id>`.
 
 ## State
 
-`.git/conductor.json` (the ledger, one entry per driven need, plus a short history of needs that reached
-`ready`) and `.git/conductor.json.lock`. Compaction and `/clear` keep the need bound to the same Claude
+`.git/conductor.json` (the ledger, one entry per driven need, plus a short history of the needs that left
+it, kept whole so a `ready` one can be reopened) and `.git/conductor.json.lock`. Compaction and `/clear` keep the need bound to the same Claude
 process (`CLAUDE_PID`); a fresh session on a driven branch is told who drives it.

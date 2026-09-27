@@ -52,6 +52,7 @@ d="$ROOT/r1"; new_repo "$d"
 assert_contains "open a need" "$(payload "$d" s1 p0 "add a greeting" | hook prompt)" "1. a prompt in scope suggests opening a need"
 assert_contains '"p0"' "$(cat "$ROOT/live/s1.json")" "1. the prompt hook stamps the conductor live for this prompt"
 assert_eq "" "$(payload "$d" s1 p0 "<task-notification>x</task-notification>" | hook prompt)" "1. a machine envelope is never a need"
+assert_eq "absent" "$([ -e "$d/.git/conductor.json" ] && echo present || echo absent)" "1. a prompt with nothing to record writes no ledger"
 
 # 2. open: the need's own branch and its ledger entry
 nid=$(open_need "$d")
@@ -168,6 +169,10 @@ watch=$(stop "$d" | reason | quoted); bash -c "$watch" >/dev/null 2>&1
 assert_contains "Need ready" "$(stop "$d" | reason)" "14. the need reaches ready"
 assert_eq "True" "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import _kernel as k
 print(k.driven(sys.argv[2], "s1", "p1"))' "$REPO_ROOT/lib" "$d")" "14. its branch stays driven for the rest of that prompt"
+env -u HARNESS_AUTO_ENGAGE bash -c "$(declare -f payload hook); payload '$d' s2 q1 'hi' | hook prompt" >/dev/null
+assert_eq "False" "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import _kernel as k
+print(k.driven(sys.argv[2], "s2", "q1"))' "$REPO_ROOT/lib" "$d")" "14. but not for a session out of scope on that branch, which never purges the ledger"
+python3 "$CS" resume --repo "$d" --session s1 --need "$nid" >/dev/null 2>&1; assert_eq 1 "$?" "14. a ready need is past resume"
 payload "$d" s1 p9 "thanks" | hook prompt >/dev/null
 assert_eq "{}" "$(ledger "$d" "['needs']")" "14. the next prompt hands the branch back"
 
@@ -176,5 +181,43 @@ d="$ROOT/r15"; new_repo "$d"
 payload "$d" s1 p1 "fix the user's \"cart\" bug; don't touch prices" | hook prompt >/dev/null
 nid=$(python3 "$CS" open --repo "$d" --session s1 --summary "fix cart" | python3 -c 'import json,sys; print(json.load(sys.stdin)["need"])')
 assert_eq "fix the user's \"cart\" bug; don't touch prices" "$(ledger "$d" "['needs']['$nid']['prompt']")" "15. open stores the captured prompt verbatim"
+
+# 16. a follow-up on a ready need re-opens it on its branch
+d="$ROOT/r14"; nid=$(ledger "$d" "['history'][-1]['id']")
+out=$(payload "$d" s1 p10 "in that PR, rename hi.txt to hello.txt" | hook prompt)
+assert_contains "reopen --need $nid" "$(echo "$out" | sed 's/ --repo [^ ]*//g')" "16. a prompt on a ready need's branch offers to reopen that need"
+python3 "$CS" reopen --repo "$d" --session s1 --need "$nid" >/dev/null
+assert_eq "active" "$(ledger "$d" "['needs']['$nid']['state']")" "16. reopen drives the need again"
+assert_eq "in that PR, rename hi.txt to hello.txt" "$(ledger "$d" "['needs']['$nid']['prompt']")" "16. with the follow-up as its prompt"
+before=$(git -C "$d" rev-list --count HEAD); git -C "$d" mv hi.txt hello.txt
+assert_contains "gate --need $nid" "$(stop "$d" s1 p10 | reason)" "16. the follow-up is committed on the need's branch and gated again"
+assert_eq "$((before + 1))" "$(git -C "$d" rev-list --count HEAD)" "16. stacked on the ready need's work"
+
+# 17. a need's work is measured against the base it was cut from, even when the local default is stale
+d="$ROOT/r17"; new_repo "$d"; git -C "$d" checkout -q -b mate; echo mate > "$d/mate.txt"; git -C "$d" add -A
+git -C "$d" commit -qm "a teammate's merged work"; git -C "$d" push -q origin mate:main; git -C "$d" checkout -q main; git -C "$d" branch -q -D mate
+nid=$(open_need "$d")
+assert_contains "Implement need $nid" "$(stop "$d" | reason)" "17. a teammate's commit on the remote default is never the need's work"
+
+# 18. in a fork clone the need is pushed where a branch with no upstream goes, never to the parent
+d="$ROOT/r18"; new_repo "$d"; git init -q --bare "$d-parent.git"; git -C "$d" remote add upstream "$d-parent.git"
+git -C "$d" push -q upstream main; git -C "$d" branch -q -u upstream/main main
+nid=$(open_need "$d")
+git -C "$d" rev-parse --abbrev-ref "need/$nid@{u}" >/dev/null 2>&1; assert_eq 128 "$?" "18. the need's branch tracks nothing"
+assert_eq "origin" "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import _kernel as k; print(k.remote_name(sys.argv[2]))' "$REPO_ROOT/lib" "$d")" "18. so it ships to origin"
+assert_eq "origin/main" "$(ledger "$d" "['needs']['$nid']['base']")" "18. from the base of the remote it ships to"
+
+# 19. a need opened in a turn no human prompt started carries no human prompt
+d="$ROOT/r19"; new_repo "$d"
+payload "$d" s1 p1 "what does the cart do? don't change anything" | hook prompt >/dev/null
+payload "$d" s1 p2 "<task-notification>done</task-notification>" | hook prompt >/dev/null
+nid=$(python3 "$CS" open --repo "$d" --session s1 --summary "x" | python3 -c 'import json,sys; print(json.load(sys.stdin)["need"])')
+assert_eq "" "$(ledger "$d" "['needs']['$nid']['prompt']")" "19. an earlier prompt is never presented as this need's"
+
+# 20. three failing reviews block the need
+d="$ROOT/r20"; new_repo "$d"; nid=$(open_need "$d")
+for i in 1 2 3; do echo "v$i" > "$d/w.txt"; gate=$(stop "$d" | reason | quoted); bash -c "$gate" >/dev/null 2>&1
+  python3 "$REPO_ROOT/plugins/merge-review/skills/merge-review/scripts/review.py" record --repo "$d" --sha HEAD --score 10 >/dev/null; out=$(stop "$d" | reason); done
+assert_contains "used its 3 attempts" "$out" "20. the third failing review blocks the need"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]
