@@ -7,7 +7,7 @@ push of a branch this session produced until the current HEAD has a passing revi
 the per-pass state so runs are iterative, and a fake-green check the fix loop runs before committing. It
 never commits, pushes, or merges, and runs no model itself. Opt a repo out with enabled:false.
 """
-import argparse, json, os, shlex, sys
+import argparse, json, os, re, shlex, sys
 from datetime import datetime, timezone
 from shutil import which
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -381,6 +381,17 @@ def fetch_mr_context(repo, forge, branch):
 PACKET_DIFF_CAP = 400000
 
 
+def replayed_tree(repo, base, approved):
+    """The approved head's patch replayed onto the current base (a merge-tree, nothing checked out):
+    diffed against HEAD it shows only what changed since the approval, rebase resolutions included."""
+    rc, current_base, _ = run(["git", "merge-base", base, "HEAD"], repo)
+    if rc != 0 or not current_base:
+        return None
+    rc, out, _ = run(["git", "merge-tree", "--write-tree", current_base, approved], repo)
+    tree = out.split("\n", 1)[0].strip()
+    return tree if rc in (0, 1) and re.fullmatch(r"[0-9a-f]{40}([0-9a-f]{24})?", tree) else None
+
+
 def cmd_context(args):
     repo = os.path.abspath(args.repo)
     cfg = load_config(repo, args.config)
@@ -402,6 +413,10 @@ def cmd_context(args):
         rc, _, _ = run(["git", "merge-base", "--is-ancestor", prior["head"], "HEAD"], repo)
         if rc == 0:
             diff_range = f"{prior['head']}..HEAD"   # the OBLIGATION shrinks to the delta; the gate
+        elif prior.get("branch") == branch:
+            replayed = replayed_tree(repo, base, prior["head"])
+            if replayed:
+                diff_range = f"{replayed} HEAD"
     ctx = {"mode": "local", "branch": branch,        # still requires a fresh record at this HEAD
            "base": base, "remote": remote, "forge": forge,
            "threshold": int(cfg.get("threshold", 80)), "auto_fix": bool(cfg.get("auto_fix", True)),
@@ -409,7 +424,7 @@ def cmd_context(args):
            "diff_cmd": f"git diff {diff_range}", "commits": commits,
            "mr": fetch_mr_context(repo, forge, branch)}
     if args.packet:
-        _, diff, _ = run(["git", "diff", diff_range], repo)
+        _, diff, _ = run(["git", "diff", *diff_range.split()], repo)
         ctx.update({
             "diff": diff[:PACKET_DIFF_CAP],
             "truncated": len(diff) > PACKET_DIFF_CAP,

@@ -161,12 +161,29 @@ case "$(env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$inc")" in
   *"\"diff_cmd\": \"git diff $h1..HEAD\""*) ok "incremental: ancestor pass → delta diff_cmd";; *) ko "incremental: ancestor pass → delta diff_cmd";; esac
 out=$("$PY" "$RV" gate --repo "$inc" --session s1)
 case "$out" in *'"permissionDecision": "deny"'*) ok "incremental: the gate still denies until a NEW record at HEAD";; *) ko "incremental: the gate still denies until a NEW record at HEAD";; esac
-# the passed head amended away (not an ancestor) → full-diff obligation again
+# the passed head rebased or amended away (not an ancestor) → the obligation is how the patch changed
 inc2="$ROOT/inc2"; mkrepo "$inc2"; git -C "$inc2" checkout -q -b feat; work "$inc2"
 "$PY" "$RV" record --repo "$inc2" --session s1 --score 90 --passed >/dev/null
-git -C "$inc2" commit -q --amend -m "amended away"
-case "$(env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$inc2")" in
-  *'"diff_cmd": "git diff main...HEAD"'*) ok "incremental: non-ancestor pass → full diff again";; *) ko "incremental: non-ancestor pass → full diff again";; esac
+git -C "$inc2" checkout -q main; echo other > "$inc2/other.txt"; git -C "$inc2" add -A; git -C "$inc2" commit -qm "main moves"
+git -C "$inc2" checkout -q feat; git -C "$inc2" rebase -q main
+packet_diff(){ env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$1" --packet | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["diff"])'; }
+assert_eq "" "$(packet_diff "$inc2")" "incremental: a clean rebase of the approved patch leaves nothing to review"
+echo "late fix" > "$inc2/late.txt"; git -C "$inc2" add -A; git -C "$inc2" commit -qm "fix: late"
+obligation="$(packet_diff "$inc2")"
+assert_contains "+late fix" "$obligation" "incremental: a commit added after the approval is reviewed in full"
+assert_absent "+change " "$obligation" "incremental: the approved change is not reviewed again"
+git -C "$inc2" commit -q --amend -m "fix: late, amended"
+echo "reworded" >> "$inc2/app.txt"; git -C "$inc2" commit -q -a --amend --no-edit
+assert_contains "+reworded" "$(packet_diff "$inc2")" "incremental: an amendment of the approved patch is reviewed"
+cf="$ROOT/inc-conflict"; mkrepo "$cf"; echo base > "$cf/app.txt"; git -C "$cf" add -A; git -C "$cf" commit -qm base
+git -C "$cf" checkout -q -b feat; echo feature > "$cf/app.txt"; echo kept > "$cf/kept.txt"; git -C "$cf" add -A; git -C "$cf" commit -qm "feat: work"
+"$PY" "$RV" record --repo "$cf" --session s1 --score 90 --passed >/dev/null
+git -C "$cf" checkout -q main; echo upstream > "$cf/app.txt"; git -C "$cf" commit -qam "main moves"
+git -C "$cf" checkout -q feat; git -C "$cf" rebase -q main >/dev/null 2>&1
+echo resolved > "$cf/app.txt"; git -C "$cf" add app.txt; GIT_EDITOR=true git -C "$cf" rebase --continue >/dev/null 2>&1
+obligation="$(packet_diff "$cf")"
+assert_contains "+resolved" "$obligation" "incremental: a rebase conflict's resolution is what gets reviewed"
+assert_absent "kept" "$obligation" "incremental: the part of the approved patch the rebase left alone is not"
 
 # --- 6b. SECURITY: gate-evasion knobs are never honored from the cloneable tree file -------------
 sv="$ROOT/sec-knobs"; mkrepo "$sv"; git -C "$sv" checkout -q -b feat
