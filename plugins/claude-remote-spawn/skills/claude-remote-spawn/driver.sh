@@ -130,6 +130,8 @@ session_stdin(){
   tail -f /dev/null
 }
 
+PARENT_SESSION_ENV="CLAUDECODE CLAUDE_PID CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN"
+
 # Launch a persistent Remote-Control session in a PTY; extra args ($3+) go to claude (e.g. --resume). Shared by spawn/resume.
 launch_session(){
   local name="$1" cwd="$2"; shift 2
@@ -139,9 +141,9 @@ launch_session(){
   # `stop` can kill the WHOLE tree — the immortal `tail -f /dev/null` included — with one signal.
   set -m
   case "$(uname -s)" in
-    Darwin) ( export TERM=xterm-256color; session_stdin "$log" | script -q "$log" "$CLAUDE" --remote-control "$name" "$@" $PERM ) >/dev/null 2>&1 & ;;
+    Darwin) ( unset $PARENT_SESSION_ENV; export TERM=xterm-256color; session_stdin "$log" | script -q "$log" "$CLAUDE" --remote-control "$name" "$@" $PERM ) >/dev/null 2>&1 & ;;
     Linux)  local cmd; printf -v cmd '%q ' "$CLAUDE" --remote-control "$name" "$@" $PERM   # %q is bash syntax: script -c runs it via $SHELL
-            ( export TERM=xterm-256color; session_stdin "$log" | SHELL="$BASH" script -qec "$cmd" "$log" ) >/dev/null 2>&1 & ;;
+            ( unset $PARENT_SESSION_ENV; export TERM=xterm-256color; session_stdin "$log" | SHELL="$BASH" script -qec "$cmd" "$log" ) >/dev/null 2>&1 & ;;
     *)      set +m; die "unsupported OS $(uname -s)" ;;
   esac
   local leader=$!
