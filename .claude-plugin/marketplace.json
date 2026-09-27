@@ -81,7 +81,7 @@
     },
     {
       "name": "merge-review",
-      "version": "2.3.2",
+      "version": "2.3.3",
       "source": "./plugins/merge-review",
       "description": "Adversarial merge-readiness review that scores a diff 0-100 across security, correctness, quality and maintainability and runs iteratively until the score clears the threshold (default 80). Two outcome modes: LOCAL (interactive) re-derives each finding, applies the attested ones (high-confidence, file:line-cited) as minimal root-cause fixes and loops until viable — contestable pure-logic findings are surfaced for you to arbitrate, never silently applied; REMOTE (diff injected by a CI/bot runner) is strictly read-only and just emits the verdict + machine-readable state. An asymmetric trust model treats diff, descriptions and comments as untrusted data that may only raise scrutiny, never lower the verdict. A pre-push gate armed while a declared delivery is in flight (default) — or, with HARNESS_AUTO_ENGAGE=1, session-scoped: the branch THIS session produced work on; a fake-green guard blocks deleted/weakened tests, --no-verify, || true, lowered thresholds; opt out per repo. Forge-agnostic (gh/glab). The review step between ship-when-done and mr-watchdog.",
       "category": "development",
