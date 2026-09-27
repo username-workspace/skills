@@ -590,6 +590,19 @@ for _ in $(seq 1 50); do [ -s "$ROOT/win50.pid" ] && break; sleep 0.1; done; cb=
 run stop win52 >/dev/null 2>&1; sleep 0.5
 { [ -n "$cb" ] && ! kill -0 "$cb" 2>/dev/null; } && ok "52. stop ends the relaunched session's claude" || ko "52. stop ends the relaunched session's claude (pid=$cb)"
 [ -n "$cb" ] && kill "$cb" 2>/dev/null; kill "$lb" 2>/dev/null; wait "$lb" 2>/dev/null
+# 53. a stale window launcher run after a spawn of the same name never takes over that spawn's record
+rm -f "$ROOT/win50.pid"
+CRS_CLAUDE_BIN="$ROOT/bin/claude-sleep" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" TERM_PROGRAM=iTerm.app bash "$DRIVER" open cross53 >/dev/null 2>&1
+cp "$STATE/cross53.cmd" "$ROOT/stale53.cmd"; run stop cross53 >/dev/null 2>&1
+run spawn cross53 >/dev/null 2>&1; for _ in $(seq 1 50); do [ -s "$STATE/cross53.spawn" ] && break; sleep 0.1; done
+pg53="$(sed -n 's/^pgid=//p' "$STATE/cross53.spawn" 2>/dev/null | head -1)"
+sleep 1.1; bash "$ROOT/stale53.cmd" >/dev/null 2>&1 & l53=$!
+for _ in $(seq 1 50); do [ -s "$ROOT/win50.pid" ] && break; sleep 0.1; done; c53="$(cat "$ROOT/win50.pid" 2>/dev/null)"
+assert_absent "launcher=" "$(cat "$STATE/cross53.spawn" 2>/dev/null)" "53. a window launcher never writes into a spawned session's record"
+run stop cross53 >/dev/null 2>&1; sleep 0.3
+ps -A -o pgid=,stat= | awk -v g="$pg53" '$1==g && $2 !~ /^Z/' | grep -q . && ko "53. stop still ends the spawned session" || ok "53. stop still ends the spawned session"
+[ -n "$pg53" ] && kill $(ps -A -o pid=,pgid= | awk -v g="$pg53" '$2==g {print $1}') 2>/dev/null
+[ -n "$c53" ] && kill "$c53" 2>/dev/null; kill "$l53" 2>/dev/null; wait "$l53" 2>/dev/null
 echo
 echo "PASS=$PASS FAIL=$FAIL"
 rm -rf "$ROOT"

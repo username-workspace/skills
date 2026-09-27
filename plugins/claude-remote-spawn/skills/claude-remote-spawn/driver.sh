@@ -287,7 +287,7 @@ case "$cmd" in
       printf '#!/usr/bin/env bash\n'
       printf 'cd %q || exit 1\n' "$cwd"
       printf 'unset %s\n' "$PARENT_SESSION_ENV"
-      printf '[ -f %q ] && printf "launcher=%%s\\nleader_start=%%s\\n" "$$" "$(LC_ALL=C TZ=UTC0 ps -o lstart= -p $$)" >> %q\n' "$STATE_DIR/$name.spawn" "$STATE_DIR/$name.spawn"
+      printf 'grep -qx mode=window %q 2>/dev/null && printf "launcher=%%s\\nleader_start=%%s\\n" "$$" "$(LC_ALL=C TZ=UTC0 ps -o lstart= -p $$)" >> %q\n' "$STATE_DIR/$name.spawn" "$STATE_DIR/$name.spawn"
       printf '%q --remote-control %q -n %q' "$CLAUDE" "$name" "$name"
       [ -n "$model" ]  && printf ' --model %q' "$model"
       [ -n "$prompt" ] && printf ' %q' "$prompt"
