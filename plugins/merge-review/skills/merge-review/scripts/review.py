@@ -7,7 +7,7 @@ push of a branch this session produced until the current HEAD has a passing revi
 the per-pass state so runs are iterative, and a fake-green check the fix loop runs before committing. It
 never commits, pushes, or merges, and runs no model itself. Opt a repo out with enabled:false.
 """
-import argparse, json, os, shlex, subprocess, sys
+import argparse, hashlib, json, os, shlex, subprocess, sys
 from datetime import datetime, timezone
 from shutil import which
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -189,9 +189,9 @@ def cmd_record(args):
     approved = prev.get("approved") if (prev.get("approved") or {}).get("branch") == branch else None
     pending = prev.get("pending") or {}
     if branch and score is not None and score >= int(cfg.get("threshold", 80)) and pending.get("head") == sha:
-        reviewed = patch_id(repo, pending.get("base") or "", sha)
+        reviewed = patch_digest(repo, pending.get("base") or "", sha)
         if reviewed:
-            approved = {"branch": branch, "head": sha, "patch_id": reviewed}
+            approved = {"branch": branch, "head": sha, "patch": reviewed}
     data = {"branch": branch, "head": sha, "score": score, "passed": passed,
             "pass": int(prev.get("pass", 0)) + 1, "findings": findings, "approved": approved}
     write_state(repo, data)
@@ -395,21 +395,19 @@ def review_base(repo, remote, base):
     return ref if rc == 0 else base
 
 
-def patch_id(repo, base, head):
-    """Identity of the patch head carries over base: stable across a clean rebase, different as soon
-    as one changed line or binary blob differs. None when git cannot tell."""
-    rc, diff, _ = run(["git", "diff", base, head], repo, raw=True)
-    if rc != 0 or not diff:
-        return None
-    p = subprocess.run(["git", "patch-id", "--stable"], cwd=repo, input=diff, capture_output=True, text=True)
-    return p.stdout.split()[0] if p.returncode == 0 and p.stdout.strip() else None
+def patch_digest(repo, base, head):
+    """Exact identity of the change head carries over base: the raw diff bytes with full blob ids, so
+    whitespace, position and encoding all count. None when git cannot produce it."""
+    p = subprocess.run(["git", "diff", "--full-index", "--binary", "--no-ext-diff", "--no-textconv",
+                        "--no-color", base, head], cwd=repo, capture_output=True)
+    return hashlib.sha256(p.stdout).hexdigest() if p.returncode == 0 and p.stdout else None
 
 
 def approved_point(repo, current_base, approved_patch):
     """The newest commit whose patch over the current base is exactly the approved one: everything up
     to it is reviewed, whatever rebase or merge brought it here."""
     rc, out, _ = run(["git", "rev-list", "--max-count=50", f"{current_base}..HEAD"], repo)
-    return next((c for c in (out.split() if rc == 0 else []) if patch_id(repo, current_base, c) == approved_patch), None)
+    return next((c for c in (out.split() if rc == 0 else []) if patch_digest(repo, current_base, c) == approved_patch), None)
 
 
 def cmd_context(args):
@@ -432,8 +430,8 @@ def cmd_context(args):
     diff_range = f"{ref}...HEAD"
     rc, current_base, _ = run(["git", "merge-base", ref, "HEAD"], repo)
     approved = prior.get("approved") or {}
-    if rc == 0 and branch and approved.get("branch") == branch and approved.get("patch_id"):
-        point = approved_point(repo, current_base, approved["patch_id"])
+    if rc == 0 and branch and approved.get("branch") == branch and approved.get("patch"):
+        point = approved_point(repo, current_base, approved["patch"])
         if point:
             diff_range = f"{point}..HEAD"   # only the obligation shrinks: the gate still wants a record at HEAD
     if rc == 0:

@@ -210,15 +210,34 @@ bin="$ROOT/inc-binary"; mkrepo "$bin"; git -C "$bin" checkout -q -b feat
 printf 'A\000\001' > "$bin/blob.bin"; git -C "$bin" add -A; git -C "$bin" commit -qm "feat: blob"; approve "$bin"
 printf 'B\000\001' > "$bin/blob.bin"; git -C "$bin" commit -q -a --amend --no-edit
 assert_eq "git diff origin/main...HEAD" "$(obligation_cmd "$bin")" "incremental: an approved binary whose bytes changed is reviewed again"
+ws="$ROOT/inc-whitespace"; mkrepo "$ws"; git -C "$ws" checkout -q -b feat
+printf '#!/bin/sh\nrm -rf /tmp/app-cache\n' > "$ws/clean.sh"; git -C "$ws" add -A; git -C "$ws" commit -qm "feat: cleanup"; approve "$ws"
+printf '#!/bin/sh\nrm -rf / tmp/app-cache\n' > "$ws/clean.sh"; git -C "$ws" commit -qam "style"
+assert_contains "rm -rf / tmp" "$(packet_diff "$ws")" "incremental: a whitespace-only change after the approval is reviewed"
+mv_="$ROOT/inc-moved"; mkrepo "$mv_"
+fn(){ printf 'def %s(req):\n    a = 1\n    b = 2\n    c = 3\n%s    d = 4\n    e = 5\n    f = 6\n    return 0\n\n' "$1" "$2"; }
+guard='    require_admin(req)\n'
+{ fn admin_delete ""; fn public_view ""; } > "$mv_/views.py"; git -C "$mv_" add -A; git -C "$mv_" commit -qm views; git -C "$mv_" push -q origin main 2>/dev/null
+git -C "$mv_" checkout -q -b feat
+{ fn admin_delete "$guard"; fn public_view ""; } > "$mv_/views.py"; git -C "$mv_" commit -qam "guard admin"; approve "$mv_"
+{ fn admin_delete ""; fn public_view "$guard"; } > "$mv_/views.py"; git -C "$mv_" commit -qam "tidy"
+assert_contains "require_admin" "$(packet_diff "$mv_")" "incremental: a guard moved to another place after the approval is reviewed"
+enc="$ROOT/inc-latin1"; mkrepo "$enc"; git -C "$enc" checkout -q -b feat
+printf 'label = "caf\351"\n' > "$enc/legacy.php"; git -C "$enc" add -A; git -C "$enc" commit -qm "feat: legacy"
+env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$enc" >/dev/null 2>&1
+"$PY" "$RV" record --repo "$enc" --session s1 --score 90 >/dev/null 2>&1; rc=$?
+assert_eq 0 "$rc" "incremental: a non-UTF-8 file never breaks record"
+echo more > "$enc/more.txt"; git -C "$enc" add -A; git -C "$enc" commit -qm more
+assert_contains "..HEAD" "$(obligation_cmd "$enc" | grep -v '\.\.\.')" "incremental: and its approval still shrinks the next review"
 other="$ROOT/inc-other"; mkrepo "$other"; git -C "$other" checkout -q -b feat; work "$other"; approve "$other"
 git -C "$other" checkout -q -b feat2; work "$other"
 assert_eq "git diff origin/main...HEAD" "$(obligation_cmd "$other")" "incremental: an approval on another branch never shrinks this one's review"
 orphan="$ROOT/inc-orphan"; mkrepo "$orphan"; git -C "$orphan" checkout -q -b feat; work "$orphan"; approve "$orphan"
 git -C "$orphan" checkout -q --orphan tmp; git -C "$orphan" commit -qm "unrelated"; git -C "$orphan" branch -q -M tmp feat
 assert_eq "git diff origin/main...HEAD" "$(obligation_cmd "$orphan")" "incremental: a history with no common base is reviewed in full"
-mkdir -p "$ROOT/nopatchid"; ln -sf "$(command -v bash)" "$ROOT/nopatchid/bash"
-printf '#!/bin/bash\n[ "$1" = patch-id ] && exit 129\nexec %s "$@"\n' "$(command -v git)" > "$ROOT/nopatchid/git"; chmod +x "$ROOT/nopatchid/git"
-assert_eq "git diff origin/main...HEAD" "$(obligation_cmd "$inc2" "$ROOT/nopatchid")" "incremental: a git that cannot identify patches means a full review"
+mkdir -p "$ROOT/nodigest"; ln -sf "$(command -v bash)" "$ROOT/nodigest/bash"
+printf '#!/bin/bash\n[ "$1 $2" = "diff --full-index" ] && exit 129\nexec %s "$@"\n' "$(command -v git)" > "$ROOT/nodigest/git"; chmod +x "$ROOT/nodigest/git"
+assert_eq "git diff origin/main...HEAD" "$(obligation_cmd "$inc2" "$ROOT/nodigest")" "incremental: a git that cannot produce the exact diff means a full review"
 keep="$ROOT/inc-keep"; mkrepo "$keep"; git -C "$keep" checkout -q -b feat; work "$keep"; approve "$keep"; kept=$(git -C "$keep" rev-parse HEAD)
 work "$keep"; approve "$keep" 50; work "$keep"
 assert_eq "git diff $kept..HEAD" "$(obligation_cmd "$keep")" "incremental: a failing pass never throws away the last approval"
