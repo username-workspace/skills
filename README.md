@@ -35,7 +35,7 @@ its own.
 <!-- plugins:begin -->
 | Plugin | Version | Category | What it does |
 |---|---|---|---|
-| [`claude-remote-spawn`](./plugins/claude-remote-spawn) | 1.5.3 | Agents | Spawn a new Claude Code session remotely, on your own machine. |
+| [`claude-remote-spawn`](./plugins/claude-remote-spawn) | 1.5.4 | Agents | Spawn a new Claude Code session remotely, on your own machine. |
 | [`find-session`](./plugins/find-session) | 1.0.4 | Agents | Find and resume the past Claude Code session you're thinking of. |
 | [`remote-control-pilot`](./plugins/remote-control-pilot) | 1.0.0 | Agents | Drive the Claude Code sessions running on your other machines, and read back what they did. |
 | [`delivery-metrics`](./plugins/delivery-metrics) | 1.0.7 | Analytics | Turn git history into a developer productivity & quality dashboard. |

@@ -8,7 +8,7 @@ mkdir -p "$ROOT/bin"
 cat > "$ROOT/bin/claude" <<'EOF'
 #!/usr/bin/env bash
 [ -n "${CRS_ARGV_CAP:-}" ] && printf '<%s>\n' "$@" > "$CRS_ARGV_CAP"
-[ -n "${CRS_ENV_CAP:-}" ] && env | grep -E '^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_|CLAUDE_CONFIG_DIR)' | sort > "$CRS_ENV_CAP"
+[ -n "${CRS_ENV_CAP:-}" ] && env | grep -E '^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_|CLAUDE_CONFIG_DIR|TRACEPARENT)' | sort > "$CRS_ENV_CAP"
 echo "stubbed-1.0"
 exit 0
 EOF
@@ -323,6 +323,7 @@ assert_contains "--remote-control winalpha" "$(cat "$STATE/winalpha.cmd" 2>/dev/
 assert_contains "-n winalpha" "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher sets the display name"
 assert_contains "close-tab" "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher self-closes its tab when the session ends"
 assert_absent "exec " "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher does NOT exec (must regain control to close the tab)"
+assert_contains "unset CLAUDECODE" "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → the launcher drops the launching session's identity, even when run by hand"
 assert_contains "ARGS" "$(cat "$ROOT/osascript.cap" 2>/dev/null)" "24. open → osascript was invoked"
 assert_contains "create tab" "$(cat "$ROOT/osascript.cap" 2>/dev/null)" "24. open (iTerm) → asks for a tab"
 run stop winalpha >/dev/null 2>&1 || true
@@ -533,7 +534,7 @@ assert_contains "procps" "$out" "46. no pgrep/pkill → says to install procps"
 assert_absent "spawned" "$out" "46. no pgrep/pkill → no invisible session recorded"
 assert_contains "procps : NOT FOUND" "$(PATH="$ROOT/bin:$ROOT/noprocps" bash "$DRIVER" check 2>&1)" "46. check → flags missing procps"
 # 47. a spawned session is top-level: none of the launching session's identity reaches it
-MARKERS="CLAUDECODE CLAUDE_PID CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN"
+MARKERS="CLAUDECODE CLAUDE_PID CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN TRACEPARENT"
 export CRS_ENV_CAP="$ROOT/env.cap" CRS_ARGV_CAP="$ROOT/argv47.cap"; rm -f "$CRS_ENV_CAP"
 (for m in $MARKERS; do export "$m=from-parent"; done; export CLAUDE_CONFIG_DIR="$ROOT/account2" CLAUDE_CODE_USE_BEDROCK=1; run spawn toplevel) >/dev/null 2>&1
 for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$CRS_ENV_CAP" ] && break; sleep 0.2; done
@@ -545,6 +546,14 @@ for m in $MARKERS; do
 done
 unset CRS_ENV_CAP CRS_ARGV_CAP; run stop toplevel >/dev/null 2>&1 || true
 
+# 48. stop kills only the session it launched: never a recycled process group, never a namesake elsewhere
+( exec -a "claude --remote-control decoy48 -n decoy48" sleep 30 ) & namesake=$!
+set -m; sleep 30 & stranger=$!; set +m
+printf 'name=decoy48\ncwd=/tmp\nstarted=x\nsubshell=%s\npgid=%s\nleader_start=Thu Jan  1 00:00:00 1970\n' "$stranger" "$stranger" > "$STATE/decoy48.spawn"
+run stop decoy48 >/dev/null 2>&1; sleep 0.3
+kill -0 "$stranger" 2>/dev/null && ok "48. a process group recycled by the OS is never killed" || ko "48. a process group recycled by the OS is never killed"
+kill -0 "$namesake" 2>/dev/null && ok "48. a namesake session outside the recorded group is never killed" || ko "48. a namesake session outside the recorded group is never killed"
+kill "$stranger" "$namesake" 2>/dev/null; wait "$stranger" "$namesake" 2>/dev/null
 echo
 echo "PASS=$PASS FAIL=$FAIL"
 rm -rf "$ROOT"
