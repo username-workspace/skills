@@ -63,9 +63,20 @@ def remote_name(repo):
     rc, up, _ = run(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], repo)
     if rc == 0 and "/" in up:
         return up.split("/", 1)[0]
+    return default_remote(repo)
+
+
+def default_remote(repo):
+    """Where a branch with no upstream is pushed: origin, else the first remote."""
     _, remotes, _ = run(["git", "remote"], repo)
     rl = [r for r in remotes.splitlines() if r.strip()]
     return ("origin" if "origin" in rl else rl[0]) if rl else None
+
+
+def base_ref(repo, remote, base):
+    """The merge target as last fetched: the remote-tracking branch when there is one."""
+    rc = run(["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/{remote}/{base}"], repo)[0] if remote else 1
+    return f"{remote}/{base}" if rc == 0 else base
 
 
 def default_branch(repo, remote):
@@ -385,6 +396,17 @@ def previous_prompt_id(transcript, prompt_id):
         return None
 
 
+MACHINE_PROMPT_RE = re.compile(
+    r"^\s*(?:Another Claude session sent a message:[^\n]*\n\s*)?"
+    r"<(?:task-notification|agent-message|cross-session-message)\b")
+
+
+def is_machine_prompt(prompt):
+    """Harness envelopes (task notifications, agent hand-backs, cross-session messages) arrive as
+    prompts; their wording is model output, never the user's intent."""
+    return bool(MACHINE_PROMPT_RE.match(prompt or ""))
+
+
 def conductor_live(session, prompt_id, transcript=None, at_prompt=False):
     """The conductor's stamp when it ran for this prompt. A UserPromptSubmit caller runs in parallel
     with the conductor's own hook, so it also accepts the stamp of the prompt just before."""
@@ -412,7 +434,16 @@ def driven(repo, session, prompt_id):
     if status != "ok":
         return status == "corrupt"
     branch = cur_branch(repo)
-    return bool(branch) and any(n.get("branch") == branch for n in ledger["needs"].values())
+    return bool(branch) and any(n.get("branch") == branch and need_holds(n, prompt_id)
+                                for n in ledger["needs"].values())
+
+
+NEED_CLOSED = ("ready", "released")
+
+
+def need_holds(need, prompt_id):
+    """A need holds its branch until it is closed, and through the rest of the prompt that closed it."""
+    return need.get("state") not in NEED_CLOSED or need.get("closed_prompt") == prompt_id
 
 
 def provenance_path(repo):

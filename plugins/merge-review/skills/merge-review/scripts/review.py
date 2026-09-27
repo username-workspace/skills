@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from shutil import which
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _kernel
-from _kernel import (auto_engage, carried_paths, cmd_resolve, cur_branch, default_branch, detect_forge,
+from _kernel import (auto_engage, base_ref, carried_paths, cmd_resolve, cur_branch, default_branch, detect_forge,
                      driven, fake_green, git_dir, head_sha, marker_for_branch, provenance_paths, remote_name,
                      repo_root, run, stage_report, trusted_config_paths, write_json)
 
@@ -387,12 +387,6 @@ def fetch_mr_context(repo, forge, branch):
 PACKET_DIFF_CAP = 400000
 
 
-def review_base(repo, remote, base):
-    """The merge target as last fetched: the remote-tracking branch when there is one."""
-    rc = run(["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/{remote}/{base}"], repo)[0] if remote else 1
-    return f"{remote}/{base}" if rc == 0 else base
-
-
 def cmd_context(args):
     repo = os.path.abspath(args.repo)
     cfg = load_config(repo, args.config)
@@ -406,7 +400,7 @@ def cmd_context(args):
     base = default_branch(repo, remote)
     branch = cur_branch(repo)
     forge = detect_forge(repo, cfg, remote)
-    ref = review_base(repo, remote, base)
+    ref = base_ref(repo, remote, base)
     rc, log, _ = run(["git", "log", "--oneline", "--no-decorate", f"{ref}..HEAD"], repo)
     commits = [l for l in log.splitlines() if l.strip()][:50] if rc == 0 else []
     prior = read_state(repo) or {}

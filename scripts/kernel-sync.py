@@ -10,7 +10,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE = os.path.join(ROOT, "lib", "_kernel.py")
-PLUGINS = ["ship-when-done", "mr-watchdog", "merge-review", "proof-of-fix"]
+PLUGINS = ["ship-when-done", "mr-watchdog", "merge-review", "proof-of-fix", "delivery-conductor"]
 
 
 def copies():

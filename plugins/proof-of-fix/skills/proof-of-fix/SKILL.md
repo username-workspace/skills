@@ -67,6 +67,12 @@ python3 scripts/repro.py clear                                        # drop thi
 prints a neutral line. Every `check` records the work state it ran on and whether the tree held still
 while the probe ran; only such a check counts as proof for a need.
 
+## When driven
+
+While a delivery-conductor need drives the branch, the nudge and the Stop re-run stand down: record the
+repro as usual (before the fix), fix the root cause, and end your turn. The conductor re-runs the probe
+as the need's proving stage.
+
 ## Stage protocol (delivery-conductor)
 
 `scripts/repro.py stage --repo R --need N --sessions S1,S2` answers, read-only, where a need stands in its `proving` stage (the repros the need's sessions recorded):

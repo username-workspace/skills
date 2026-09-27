@@ -11,7 +11,7 @@ from shutil import which
 from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _kernel
-from _kernel import (auto_engage, carried_paths, cmd_resolve, cur_branch, driven, git_dir, git_toplevel,
+from _kernel import (auto_engage, base_ref, carried_paths, cmd_resolve, cur_branch, driven, git_dir, git_toplevel,
                      gitlab_branch_project_id, marker_for_branch, marker_path, parse_remote,
                      provenance_path, provenance_paths, read_marker, read_state, remote_name, repo_root,
                      run, stage_report, trusted_config_paths, write_json)
@@ -142,7 +142,7 @@ def git_state(repo):
     ahead_of_base = unpushed = 0
     has_upstream = False
     if not detached and not unborn:
-        rc, ab, _ = run(["git", "rev-list", "--count", f"{base}..HEAD"], repo)
+        rc, ab, _ = run(["git", "rev-list", "--count", f"{base_ref(repo, remote, base)}..HEAD"], repo)
         ahead_of_base = int(ab) if rc == 0 and ab.isdigit() else 0
         rc_u, up, _ = run(["git", "rev-list", "--count", "@{u}..HEAD"], repo)
         has_upstream = rc_u == 0
@@ -1020,7 +1020,7 @@ def cmd_open_pr(args):
         reply({"pr": None, "refused": "pr-check-failed"}, False)
     if status == "none":
         title = f"{marker.get('type') or 'chore'}: {marker.get('summary') or branch}"
-        _, body, _ = run(["git", "log", "--format=- %s", f"{base}..HEAD"], repo)
+        _, body, _ = run(["git", "log", "--format=- %s", f"{base_ref(repo, state['remote'], base)}..HEAD"], repo)
         create = (["gh", "pr", "create", "--base", base, "--head", branch, "--title", title, "--body", body or title]
                   if strategy == "gh" else
                   ["glab", "mr", "create", "--source-branch", branch, "--target-branch", base, "--title", title,

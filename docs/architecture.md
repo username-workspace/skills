@@ -225,6 +225,29 @@ need. The harness plugins update together; a sibling too old for `handoff` leave
 `.git/swd-handoff.json`. merge-review's presence and its push hold are separate: its session
 file exists whenever it is enabled, and only its `prepush_gate` flag arms ship-when-done's hold.
 
+### The conductor
+
+`delivery-conductor` owns no stage. A need opens on its own branch, cut from the base its owners
+measure against (the default branch of the remote a branch with no upstream ships to, as last fetched;
+`conductor.py open`: the prompt the hook captured for that turn, a summary and criteria; one need per
+worktree), and lives in
+`.git/conductor.json` while that branch is driven. At every Stop
+the conductor asks the owners' `stage` CLIs, in the order of the table above, and acts on the first
+stage that is not done: a `script` step runs inside the hook (several can chain within its time
+budget), a `background` step comes back as a command to launch, and while a task carrying the need
+token runs (`--need <id>` in a shell command, `need:<id>` in a subagent's description, such as the
+reviewer's) the conductor waits instead of asking again; a `skill` step is the model's judgment step.
+Every human prompt during a need is classified (`halt`, `resume`, `abandon`, `amend`, `note`) before
+the need advances; compaction and `/clear` re-bind the need to the same Claude process (`CLAUDE_PID`).
+
+A need is blocked, and the user told once, on the same blocking decision three times with no change in
+work state, on a stage failing too many times in a row (three reviews, six otherwise; the stage being
+done resets it), or past eight hours of driven time (`resume` restarts the clock). A blocked or
+abandoned need keeps its branch held (driven) until `resume` or `release`; `release` and `ready` hold
+the branch through the rest of the deciding prompt only (`need_holds()`, whatever the session's scope),
+so no sibling speaks in that turn. The ledger then keeps the need whole in its history: a follow-up on a
+`ready` need (review comments, a change to its PR/MR) reopens it on its branch (`conductor.py reopen`).
+
 ## 6. Engagement modes
 
 "Engagement" answers one question: *should this plugin act on the current branch right now?* There are

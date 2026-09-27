@@ -15,16 +15,12 @@ import argparse, json, os, re, subprocess, sys
 from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _kernel
-from _kernel import conductor_scope, driven, git_dir, repo_root, run, stage_report
+from _kernel import conductor_scope, driven, git_dir, is_machine_prompt, repo_root, run, stage_report
 
 INTENT_RE = re.compile(
     r"\b(bugs?|broken|regressions?|r[ée]gressions?|crash(es|ed)?|plante|fix(e[rz]?|es|ed|ing)?|"
     r"corrige[rz]?|r[ée]pare[rz]?|fails?|failing|failure|[ée]choue|cass[ée]e?s?|"
     r"doesn'?t\s+work|ne\s+(marche|fonctionne)\s+(plus|pas))\b", re.I)
-
-ENVELOPE_RE = re.compile(
-    r"^\s*(?:Another Claude session sent a message:[^\n]*\n\s*)?"
-    r"<(?:task-notification|agent-message|cross-session-message)\b")
 
 NUDGE = ("[proof-of-fix] This prompt looks like a bug/fix request. Evidence-first protocol: "
          "(1) REPRODUCE before touching any code — write the smallest failing probe (a test or a "
@@ -192,7 +188,7 @@ def cmd_nudge(args):
     if load_config(repo).get("enabled", True) is False:
         return
     prompt = args.prompt or ""
-    if ENVELOPE_RE.match(prompt) or not INTENT_RE.search(prompt):
+    if is_machine_prompt(prompt) or not INTENT_RE.search(prompt):
         return
     if not os.path.isdir(git_dir(repo)) or conductor_scope(args.session, args.prompt_id, args.transcript):
         return

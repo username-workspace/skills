@@ -1,0 +1,14 @@
+{
+  "category": "DevOps",
+  "tagline": "State a need, get a ready PR/MR: the conductor sequences commit, gate, proof, review, push and CI.",
+  "summary": "delivery-conductor turns a stated need into a ready, reviewed PR/MR without intervention. The need opens on its own branch; at every Stop the conductor asks each sibling's read-only stage CLI where the need stands (ship-when-done, proof-of-fix, merge-review, mr-watchdog), runs the short script steps itself (commit, mark-done, push, open the PR/MR, mark it ready), tells the model to launch the long ones in the background (the gate, a probe, the CI watcher), and hands it only the judgment steps (implement, review, fix). While it drives a branch every sibling stands down, so there is one voice. A halt, three Stops with no progress, or an exhausted budget blocks the need and holds its branch until the user resumes, abandons or releases it.",
+  "capabilities": [
+    "open: a need on its own branch, with its summary, criteria and the verbatim prompt; refuses a dirty tree it did not produce and any repo where a stage owner is missing",
+    "One Stop, one step: the first unfinished stage in order (implementing, gating, proving, reviewing, shipping, ci, ready) decides the next action",
+    "Script steps run inside the hook; background steps are named with their need token so the conductor waits on them instead of nagging",
+    "Breakers: three blocking decisions with no change, a per-stage attempt budget (reviewing: three passes) and a wall-clock budget block the need and escalate",
+    "halt, resume, abandon, release, amend, note: every human prompt during a need is classified before the need advances; compaction and /clear re-bind the need to the same Claude process"
+  ],
+  "commands": ["delivery-conductor"],
+  "platforms": ["macOS", "Linux"]
+}
