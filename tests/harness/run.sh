@@ -504,6 +504,11 @@ printf '{"gate":"touch %s"}' "$ROOT/pwned" > "$dE/vendor/evil/ship-when-done.jso
 git -C "$dE" add -A; git -C "$dE" commit -qm "vendor an embedded bare repo"
 python3 "$SHIP" gate --repo "$dE/vendor/evil" --need n17 >/dev/null 2>&1
 [ -e "$ROOT/pwned" ] && ko "17b. a gate from an embedded bare repo never runs" || ok "17b. a gate from an embedded bare repo never runs"
+git -C "$dE/vendor/evil" symbolic-ref HEAD refs/heads/embedded-branch
+git -C "$dE/vendor/evil" config remote.origin.url https://gitlab.com/evil/repo.git
+assert_eq "None gitlab-no" "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import _kernel as k
+e = sys.argv[2]; print(k.cur_branch(e), "gitlab-" + ("yes" if k.detect_forge(e, {}, k.remote_name(e)) == "gitlab" else "no"))' "$REPO_ROOT/lib" "$dE/vendor/evil")" \
+  "17b. no harness git call reads an embedded bare repo's HEAD or config"
 git clone -q --bare "$dW" "$ROOT/real.git"; git -C "$ROOT/real.git" worktree add -q -b feat17b "$ROOT/real-wt"
 printf '{"gate":"echo ran >> %s"}' "$ROOT/gate17b.log" > "$ROOT/real.git/ship-when-done.json"; : > "$ROOT/gate17b.log"
 git -C "$ROOT/real-wt" config user.email t@t.t; git -C "$ROOT/real-wt" config user.name t

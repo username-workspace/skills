@@ -327,6 +327,10 @@ Run the E2E lane deliberately: before a release or after a harness change.
 - **No shell from cloneable files.** Shell-command config fields (`gate`, `judge_command`, …) and the
   gate-strictness knobs are honoured **only** from `.git/` (never cloned) or an explicit `--config` —
   never from the working-tree `.<plugin>.json` that arrives with any clone.
+- **No implicit bare repository.** Every git call the kernel makes carries `-c safe.bareRepository=explicit`
+  (git 2.38+), so a directory shaped like a bare repository inside a clone is never opened as a git dir:
+  its HEAD, its git config and any `.git/`-style state in it are never read. With git 2.38 to 2.44 the same
+  guard also refuses a path inside a normal repo's `.git/`; the harness never works from there.
 - **Read-only watchers.** mr-watchdog never commits, pushes, or merges, and runs no model itself.
 - **Branch-first, never the trunk.** ship-when-done never commits or pushes the default branch, and
   never merges; the human merges the PR it opens.
