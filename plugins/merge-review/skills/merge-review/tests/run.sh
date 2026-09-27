@@ -27,7 +27,7 @@ d="$ROOT/ctx"; mkrepo "$d"; git -C "$d" checkout -q -b feat; work "$d"
 ctx=$(env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$d")
 case "$ctx" in *'"mode": "local"'*) ok "context local: mode=local";; *) ko "context local mode [$ctx]";; esac
 case "$ctx" in *'"base": "main"'*) ok "context: base detected (main)";; *) ko "context base";; esac
-case "$ctx" in *'git diff main...HEAD'*) ok "context: diff_cmd against base";; *) ko "context diff_cmd";; esac
+case "$ctx" in *'git diff origin/main...HEAD'*) ok "context: diff_cmd against the fetched merge target";; *) ko "context diff_cmd";; esac
 case "$ctx" in *'"threshold": 80'*) ok "context: default threshold 80";; *) ko "context threshold";; esac
 case "$ctx" in *'feat: work'*) ok "context: commits listed";; *) ko "context commits";; esac
 
@@ -150,76 +150,78 @@ t="$ROOT/thr"; mkrepo "$t"; git -C "$t" checkout -q -b feat; work "$t"; printf '
 case "$("$PY" "$RV" prior --repo "$t")" in *'"passed": false'*) ok "threshold: 85 < custom 90 → not passed";; *) ko "custom threshold";; esac
 case "$(env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$t")" in *'"threshold": 90'*) ok "context: custom threshold surfaced";; *) ko "context custom threshold";; esac
 
-# --- 6c. incremental staleness: a PASSED ancestor head shrinks the obligation, never the gate ----
-inc="$ROOT/inc"; mkrepo "$inc"; git -C "$inc" checkout -q -b feat
-"$PY" "$RV" baseline --repo "$inc" --session s1
-work "$inc"
-"$PY" "$RV" record --repo "$inc" --session s1 --score 90 --passed >/dev/null
-h1=$(git -C "$inc" rev-parse HEAD)
-echo more > "$inc/more.txt"; git -C "$inc" add -A; git -C "$inc" commit -qm more
-case "$(env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$inc")" in
-  *"\"diff_cmd\": \"git diff $h1..HEAD\""*) ok "incremental: ancestor pass → delta diff_cmd";; *) ko "incremental: ancestor pass → delta diff_cmd";; esac
-out=$("$PY" "$RV" gate --repo "$inc" --session s1)
-case "$out" in *'"permissionDecision": "deny"'*) ok "incremental: the gate still denies until a NEW record at HEAD";; *) ko "incremental: the gate still denies until a NEW record at HEAD";; esac
-# the passed head rebased or amended away (not an ancestor) → the obligation is how the patch changed
-inc2="$ROOT/inc2"; mkrepo "$inc2"; git -C "$inc2" checkout -q -b feat; work "$inc2"
-"$PY" "$RV" record --repo "$inc2" --session s1 --score 90 --passed >/dev/null
-git -C "$inc2" checkout -q main; echo other > "$inc2/other.txt"; git -C "$inc2" add -A; git -C "$inc2" commit -qm "main moves"
-git -C "$inc2" checkout -q feat; git -C "$inc2" rebase -q main
+# --- 6c. incremental staleness: an approval shrinks the obligation to what follows it, never the gate --
 packet_diff(){ env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$1" --packet | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["diff"])'; }
 obligation_cmd(){ env PATH="${2:-$ROOT/realbin}" "$PY" "$RV" context --repo "$1" | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["diff_cmd"])'; }
-assert_contains "git diff " "$(obligation_cmd "$inc2" | grep -E '^git diff [0-9a-f]{40,64} HEAD$')" "incremental: after a rebase the obligation is the replayed approval against HEAD"
+approve(){ env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$1" >/dev/null; "$PY" "$RV" record --repo "$1" --session s1 --score "${2:-90}" >/dev/null; }
+main_moves(){ git -C "$1" checkout -q main; echo "$2" > "$1/$2.txt"; git -C "$1" add -A; git -C "$1" commit -qm "main: $2"
+  git -C "$1" push -q origin main 2>/dev/null; git -C "$1" checkout -q feat; }
+secret_on_main(){ mkrepo "$1"; echo "SECRET=1" > "$1/config.env"; git -C "$1" add -A; git -C "$1" commit -qm "main: oops"
+  git -C "$1" push -q origin main 2>/dev/null; git -C "$1" checkout -q -b feat; work "$1"; }
+inc="$ROOT/inc"; mkrepo "$inc"; git -C "$inc" checkout -q -b feat
+"$PY" "$RV" baseline --repo "$inc" --session s1
+work "$inc"; approve "$inc"; h1=$(git -C "$inc" rev-parse HEAD)
+echo more > "$inc/more.txt"; git -C "$inc" add -A; git -C "$inc" commit -qm more
+assert_eq "git diff $h1..HEAD" "$(obligation_cmd "$inc")" "incremental: commits after the approval are all that is reviewed"
+out=$("$PY" "$RV" gate --repo "$inc" --session s1)
+case "$out" in *'"permissionDecision": "deny"'*) ok "incremental: the gate still denies until a NEW record at HEAD";; *) ko "incremental: the gate still denies until a NEW record at HEAD";; esac
+legacy="$ROOT/inc-legacy"; mkrepo "$legacy"; git -C "$legacy" checkout -q -b feat; work "$legacy"
+"$PY" "$RV" record --repo "$legacy" --session s1 --score 90 --passed >/dev/null; work "$legacy"
+assert_eq "git diff origin/main...HEAD" "$(obligation_cmd "$legacy")" "incremental: a record that never saw the reviewed base approves nothing"
+inc2="$ROOT/inc2"; mkrepo "$inc2"; git -C "$inc2" checkout -q -b feat; work "$inc2"; approve "$inc2"
+main_moves "$inc2" other; git -C "$inc2" rebase -q main
+assert_eq "git diff $(git -C "$inc2" rev-parse HEAD)..HEAD" "$(obligation_cmd "$inc2")" "incremental: after a clean rebase the approval point is the rebased head"
 assert_eq "" "$(packet_diff "$inc2")" "incremental: a clean rebase of the approved patch leaves nothing to review"
 echo "late fix" > "$inc2/late.txt"; git -C "$inc2" add -A; git -C "$inc2" commit -qm "fix: late"
 obligation="$(packet_diff "$inc2")"
-assert_contains "+late fix" "$obligation" "incremental: a commit added after the approval is reviewed in full"
+assert_contains "+late fix" "$obligation" "incremental: a commit added after the rebase is reviewed"
 assert_absent "+change " "$obligation" "incremental: the approved change is not reviewed again"
-git -C "$inc2" commit -q --amend -m "fix: late, amended"
-echo "reworded" >> "$inc2/app.txt"; git -C "$inc2" commit -q -a --amend --no-edit
-assert_contains "+reworded" "$(packet_diff "$inc2")" "incremental: an amendment of the approved patch is reviewed"
-cf="$ROOT/inc-conflict"; mkrepo "$cf"; echo base > "$cf/app.txt"; git -C "$cf" add -A; git -C "$cf" commit -qm base
-git -C "$cf" checkout -q -b feat; echo feature > "$cf/app.txt"; echo kept > "$cf/kept.txt"; git -C "$cf" add -A; git -C "$cf" commit -qm "feat: work"
-"$PY" "$RV" record --repo "$cf" --session s1 --score 90 --passed >/dev/null
-git -C "$cf" checkout -q main; echo upstream > "$cf/app.txt"; git -C "$cf" commit -qam "main moves"
+git -C "$inc2" commit -q --amend -m "fix: late, reworded"
+assert_contains "+late fix" "$(packet_diff "$inc2")" "incremental: an amended commit after the approval is reviewed"
+mrg="$ROOT/inc-merge"; mkrepo "$mrg"; git -C "$mrg" checkout -q -b feat; work "$mrg"; approve "$mrg"
+main_moves "$mrg" upstream; git -C "$mrg" merge -q --no-edit main
+assert_eq "" "$(packet_diff "$mrg")" "incremental: merging the base in adds nothing to review"
+cf="$ROOT/inc-conflict"; mkrepo "$cf"; echo base > "$cf/app.txt"; git -C "$cf" add -A; git -C "$cf" commit -qm base; git -C "$cf" push -q origin main 2>/dev/null
+git -C "$cf" checkout -q -b feat; echo feature > "$cf/app.txt"; git -C "$cf" commit -qam "feat: work"; approve "$cf"
+git -C "$cf" checkout -q main; echo upstream > "$cf/app.txt"; git -C "$cf" commit -qam "main moves"; git -C "$cf" push -q origin main 2>/dev/null
 git -C "$cf" checkout -q feat; git -C "$cf" rebase -q main >/dev/null 2>&1
 echo resolved > "$cf/app.txt"; git -C "$cf" add app.txt; GIT_EDITOR=true git -C "$cf" rebase --continue >/dev/null 2>&1
-obligation="$(packet_diff "$cf")"
-assert_contains "+resolved" "$obligation" "incremental: a rebase conflict's resolution is what gets reviewed"
-assert_absent "kept" "$obligation" "incremental: the part of the approved patch the rebase left alone is not"
-for how in rebase merge; do
-  rw="$ROOT/inc-rewound-$how"; mkrepo "$rw"
-  echo "SECRET=1" > "$rw/config.env"; git -C "$rw" add -A; git -C "$rw" commit -qm "main: oops"
-  git -C "$rw" checkout -q -b feat; work "$rw"
-  "$PY" "$RV" record --repo "$rw" --session s1 --score 90 --passed >/dev/null
-  git -C "$rw" checkout -q main; git -C "$rw" reset -q --hard HEAD~1; echo n > "$rw/n.txt"; git -C "$rw" add -A; git -C "$rw" commit -qm "main: next"
-  git -C "$rw" checkout -q feat
-  if [ "$how" = rebase ]; then git -C "$rw" rebase -q main; else git -C "$rw" merge -q --no-edit main; fi
+assert_eq "git diff origin/main...HEAD" "$(obligation_cmd "$cf")" "incremental: a rebase that resolved a conflict is reviewed in full"
+for how in rebase merge fetched fetched-merge; do
+  rw="$ROOT/inc-rewound-$how"; secret_on_main "$rw"; approve "$rw"
+  case "$how" in fetched*)
+    git -C "$rw" checkout -q -b rewritten main~1; echo n > "$rw/n.txt"; git -C "$rw" add -A; git -C "$rw" commit -qm "main: next"
+    git -C "$rw" push -q -f origin rewritten:main 2>/dev/null; git -C "$rw" fetch -q origin; git -C "$rw" checkout -q feat
+    if [ "$how" = fetched ]; then git -C "$rw" rebase -q origin/main; else git -C "$rw" merge -q --no-edit origin/main; fi ;;
+  *)
+    git -C "$rw" checkout -q main; git -C "$rw" reset -q --hard HEAD~1; echo n > "$rw/n.txt"; git -C "$rw" add -A; git -C "$rw" commit -qm "main: next"
+    git -C "$rw" push -q -f origin main 2>/dev/null; git -C "$rw" checkout -q feat
+    if [ "$how" = rebase ]; then git -C "$rw" rebase -q main; else git -C "$rw" merge -q --no-edit main; fi ;;
+  esac
   assert_contains "+SECRET=1" "$(packet_diff "$rw")" "incremental: a commit the base dropped after the approval is reviewed ($how)"
 done
-other="$ROOT/inc-other"; mkrepo "$other"; git -C "$other" checkout -q -b feat; work "$other"
-"$PY" "$RV" record --repo "$other" --session s1 --score 90 --passed >/dev/null
+race="$ROOT/inc-race"; secret_on_main "$race"; approve "$race"; work "$race"
+env PATH="$ROOT/realbin" "$PY" "$RV" context --repo "$race" >/dev/null
+git -C "$race" checkout -q main; git -C "$race" reset -q --hard HEAD~1; echo n > "$race/n.txt"; git -C "$race" add -A; git -C "$race" commit -qm "main: next"
+git -C "$race" push -q -f origin main 2>/dev/null; git -C "$race" checkout -q feat
+"$PY" "$RV" record --repo "$race" --session s1 --score 90 >/dev/null; git -C "$race" rebase -q main
+assert_contains "+SECRET=1" "$(packet_diff "$race")" "incremental: a base rewritten during the review never widens the approval"
+bin="$ROOT/inc-binary"; mkrepo "$bin"; git -C "$bin" checkout -q -b feat
+printf 'A\000\001' > "$bin/blob.bin"; git -C "$bin" add -A; git -C "$bin" commit -qm "feat: blob"; approve "$bin"
+printf 'B\000\001' > "$bin/blob.bin"; git -C "$bin" commit -q -a --amend --no-edit
+assert_eq "git diff origin/main...HEAD" "$(obligation_cmd "$bin")" "incremental: an approved binary whose bytes changed is reviewed again"
+other="$ROOT/inc-other"; mkrepo "$other"; git -C "$other" checkout -q -b feat; work "$other"; approve "$other"
 git -C "$other" checkout -q -b feat2; work "$other"
-assert_eq "git diff main...HEAD" "$(obligation_cmd "$other")" "incremental: an approval on another branch never shrinks this one's review"
-gone="$ROOT/inc-gone"; mkrepo "$gone"; git -C "$gone" checkout -q -b feat; work "$gone"
-"$PY" "$RV" record --repo "$gone" --session s1 --score 90 --passed >/dev/null
-git -C "$gone" commit -q --amend -m "amended"; git -C "$gone" reflog expire --expire=now --all; git -C "$gone" gc -q --prune=now
-assert_eq "git diff main...HEAD" "$(obligation_cmd "$gone")" "incremental: an approved head git no longer has means a full review"
-orphan="$ROOT/inc-orphan"; mkrepo "$orphan"; git -C "$orphan" checkout -q -b feat; work "$orphan"
-"$PY" "$RV" record --repo "$orphan" --session s1 --score 90 --passed >/dev/null
+assert_eq "git diff origin/main...HEAD" "$(obligation_cmd "$other")" "incremental: an approval on another branch never shrinks this one's review"
+orphan="$ROOT/inc-orphan"; mkrepo "$orphan"; git -C "$orphan" checkout -q -b feat; work "$orphan"; approve "$orphan"
 git -C "$orphan" checkout -q --orphan tmp; git -C "$orphan" commit -qm "unrelated"; git -C "$orphan" branch -q -M tmp feat
-assert_eq "git diff main...HEAD" "$(obligation_cmd "$orphan")" "incremental: a history with no common base never replays the approval"
-mkdir -p "$ROOT/nomergetree"; ln -sf "$(command -v bash)" "$ROOT/nomergetree/bash"
-printf '#!/bin/bash\n[ "$1" = merge-tree ] && exit 129\nexec %s "$@"\n' "$(command -v git)" > "$ROOT/nomergetree/git"; chmod +x "$ROOT/nomergetree/git"
-assert_eq "git diff main...HEAD" "$(obligation_cmd "$inc2" "$ROOT/nomergetree")" "incremental: a git that cannot replay the approval means a full review"
-keep="$ROOT/inc-keep"; mkrepo "$keep"; git -C "$keep" checkout -q -b feat; work "$keep"
-"$PY" "$RV" record --repo "$keep" --session s1 --score 90 --passed >/dev/null
-git -C "$keep" checkout -q main; echo o > "$keep/o.txt"; git -C "$keep" add -A; git -C "$keep" commit -qm "main moves"
-git -C "$keep" checkout -q feat; git -C "$keep" rebase -q main
-"$PY" "$RV" record --repo "$keep" --session s1 --score 50 >/dev/null
-echo "fix" > "$keep/fix.txt"; git -C "$keep" add -A; git -C "$keep" commit -qm "fix: finding"
-obligation="$(packet_diff "$keep")"
-assert_contains "+fix" "$obligation" "incremental: after a failing pass the fix is reviewed"
-assert_absent "+change " "$obligation" "incremental: and a failing pass never throws away the last approval"
+assert_eq "git diff origin/main...HEAD" "$(obligation_cmd "$orphan")" "incremental: a history with no common base is reviewed in full"
+mkdir -p "$ROOT/nopatchid"; ln -sf "$(command -v bash)" "$ROOT/nopatchid/bash"
+printf '#!/bin/bash\n[ "$1" = patch-id ] && exit 129\nexec %s "$@"\n' "$(command -v git)" > "$ROOT/nopatchid/git"; chmod +x "$ROOT/nopatchid/git"
+assert_eq "git diff origin/main...HEAD" "$(obligation_cmd "$inc2" "$ROOT/nopatchid")" "incremental: a git that cannot identify patches means a full review"
+keep="$ROOT/inc-keep"; mkrepo "$keep"; git -C "$keep" checkout -q -b feat; work "$keep"; approve "$keep"; kept=$(git -C "$keep" rev-parse HEAD)
+work "$keep"; approve "$keep" 50; work "$keep"
+assert_eq "git diff $kept..HEAD" "$(obligation_cmd "$keep")" "incremental: a failing pass never throws away the last approval"
 
 # --- 6b. SECURITY: gate-evasion knobs are never honored from the cloneable tree file -------------
 sv="$ROOT/sec-knobs"; mkrepo "$sv"; git -C "$sv" checkout -q -b feat
