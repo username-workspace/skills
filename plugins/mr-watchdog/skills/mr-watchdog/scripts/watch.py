@@ -57,22 +57,24 @@ def forge_cli(forge):
 # --- remote state: open MR + CI status -------------------------------------------------------------
 
 def mr_open(repo, forge, branch):
+    """True or False when the forge answered; None when it could not be asked (network, auth, rate
+    limit), which is never a closed MR."""
     if forge == "github":
-        rc, out, _ = run(["gh", "pr", "view", branch, "--json", "state"], repo)
+        rc, out, err = run(["gh", "pr", "view", branch, "--json", "state"], repo)
         if rc != 0:
-            return False
+            return False if "no pull requests found" in err else None
         try:
             return json.loads(out).get("state") == "OPEN"
         except Exception:
-            return False
+            return None
     if forge == "gitlab":
         rc, out, _ = run(["glab", "mr", "list", "--source-branch", branch, "-F", "json"], repo)
         if rc != 0:
-            return False
+            return None
         try:
             return any((m.get("state") == "opened") for m in json.loads(out))
         except Exception:
-            return False
+            return None
     return False
 
 
@@ -386,7 +388,10 @@ def tick(repo, cfg, branch, forge, remote):
     """One poll. Returns {'state': continue|green|needs-fix|no-mr|branch-changed}. Read-only."""
     if cur_branch(repo) != branch:
         return {"state": "branch-changed"}
-    if not mr_open(repo, forge, branch):
+    open_mr = mr_open(repo, forge, branch)
+    if open_mr is None:
+        return {"state": "continue"}
+    if not open_mr:
         return {"state": "no-mr"}
     status = ci_status(repo, forge, branch)
     if status == "success":
@@ -476,15 +481,16 @@ def cmd_run(args):
             settle(repo, head, branch, "stopped", "branch or HEAD moved")
             print("[mr-watchdog] stopped: branch/HEAD moved — a fresh watcher starts after the next push")
             return
-        if not mr_open(repo, forge, branch):
+        open_mr = mr_open(repo, forge, branch)
+        if open_mr is False:
             settle(repo, head, branch, "stopped", "no open merge request")
             print("[mr-watchdog] stopped: no open merge request for this branch")
             return
-        status = ci_status_at(repo, forge, head, branch)
+        status = "error" if open_mr is None else ci_status_at(repo, forge, head, branch)
         errors = errors + 1 if status == "error" else 0
         if errors >= 5:
-            settle(repo, head, branch, "stopped", "the forge CLI keeps failing to read CI status")
-            print("[mr-watchdog] stopped: the forge CLI keeps failing to read CI status "
+            settle(repo, head, branch, "stopped", "the forge CLI keeps failing to read the MR or its CI")
+            print("[mr-watchdog] stopped: the forge CLI keeps failing to read the MR or its CI "
                   "(check gh/glab auth) — not a CI verdict")
             return
         if status == "success":
