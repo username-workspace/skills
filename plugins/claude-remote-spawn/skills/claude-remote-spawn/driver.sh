@@ -20,8 +20,13 @@ need_claude(){ [ -n "$CLAUDE" ] || die "claude not found (set CRS_CLAUDE_BIN)"; 
 need_script(){ command -v script >/dev/null 2>&1 || die "script(1) not found"; }
 need_procps(){ command -v pgrep >/dev/null 2>&1 && command -v pkill >/dev/null 2>&1 \
   || die "pgrep/pkill not found — install procps (session liveness, list and stop rely on them)"; }
-spawn_get(){ sed -n "s/^$2=//p" "$STATE_DIR/$1.spawn" 2>/dev/null | head -1; }
+spawn_get(){ sed -n "s/^$2=//p" "$STATE_DIR/$1.spawn" 2>/dev/null | tail -1; }
 is_running(){ [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
+leader_start(){ LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null; }
+# $1=pgid: that group and its descendants (script(1) may start claude in a session of its own);
+# $2=pid: that process's descendants, itself excluded
+proc_tree(){ ps -A -o pid=,ppid=,pgid= | awk -v g="$1" -v r="${2:-}" '{ p[$1]=$2; if ((g != "" && $3==g) || (r != "" && $2==r)) k[$1]=1 }
+  END { do { c=0; for (x in p) if (!(x in k) && (p[x] in k)) { k[x]=1; c=1 } } while (c); for (x in k) print x }'; }
 # liveness = the real PTY/claude process, NOT the wrapper subshell: the subshell is kept alive by
 # session_stdin's immortal `tail -f /dev/null`, so it would always look "live". Trailing space anchors
 # the name (launch always passes args after it) so 'alpha' ≠ 'alphabet'.
@@ -130,7 +135,7 @@ session_stdin(){
   tail -f /dev/null
 }
 
-PARENT_SESSION_ENV="CLAUDECODE CLAUDE_PID CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN"
+PARENT_SESSION_ENV="CLAUDECODE CLAUDE_PID CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN TRACEPARENT"
 
 # Launch a persistent Remote-Control session in a PTY; extra args ($3+) go to claude (e.g. --resume). Shared by spawn/resume.
 launch_session(){
@@ -148,7 +153,7 @@ launch_session(){
   esac
   local leader=$!
   set +m
-  printf 'name=%s\ncwd=%s\nstarted=%s\nsubshell=%s\npgid=%s\n' "$name" "$cwd" "$(date -u +%FT%TZ)" "$leader" "$leader" >"$STATE_DIR/$name.spawn"
+  printf 'name=%s\ncwd=%s\nstarted=%s\nsubshell=%s\npgid=%s\nleader_start=%s\n' "$name" "$cwd" "$(date -u +%FT%TZ)" "$leader" "$leader" "$(leader_start "$leader")" >"$STATE_DIR/$name.spawn"
 }
 
 slugify(){ printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' | sed 's/^-*//; s/-*$//' | cut -c1-48 | sed 's/-*$//'; }
@@ -281,6 +286,8 @@ case "$cmd" in
     {
       printf '#!/usr/bin/env bash\n'
       printf 'cd %q || exit 1\n' "$cwd"
+      printf 'unset %s\n' "$PARENT_SESSION_ENV"
+      printf 'grep -qx mode=window %q 2>/dev/null && printf "launcher=%%s\\nleader_start=%%s\\n" "$$" "$(LC_ALL=C TZ=UTC0 ps -o lstart= -p $$)" >> %q\n' "$STATE_DIR/$name.spawn" "$STATE_DIR/$name.spawn"
       printf '%q --remote-control %q -n %q' "$CLAUDE" "$name" "$name"
       [ -n "$model" ]  && printf ' --model %q' "$model"
       [ -n "$prompt" ] && printf ' %q' "$prompt"
@@ -290,6 +297,8 @@ case "$cmd" in
       printf 'exit "$rc"\n'
     } >"$launcher"
     chmod +x "$launcher"
+    printf 'name=%s\ncwd=%s\nstarted=%s\nmode=window\n' "$name" "$cwd" "$(date -u +%FT%TZ)" >"$STATE_DIR/$name.spawn"
+    [ -n "$model" ] && echo "model=$model" >>"$STATE_DIR/$name.spawn"
     rc=0; open_terminal_tab "$launcher" || rc=$?
     case "$rc" in
       0) ;;
@@ -297,8 +306,6 @@ case "$cmd" in
       3) rm -f "$STATE_DIR/$name.spawn"; die "open: osascript not found (macOS-only auto-open) — run it yourself in any terminal: $launcher" ;;
       *) rm -f "$STATE_DIR/$name.spawn"; die "open: could not open a terminal tab (osascript exit $rc) — run it yourself: $launcher" ;;
     esac
-    printf 'name=%s\ncwd=%s\nstarted=%s\nmode=window\n' "$name" "$cwd" "$(date -u +%FT%TZ)" >"$STATE_DIR/$name.spawn"
-    [ -n "$model" ] && echo "model=$model" >>"$STATE_DIR/$name.spawn"
     keepawake_hold
     echo "$name"
     echo "opened '$name'${model:+ (model: $model)} in a new terminal tab (cwd: $cwd) — live & Remote-Control-drivable while the tab stays open; 'stop $name' or closing the tab ends it (the tab then closes itself)." >&2
@@ -355,18 +362,21 @@ case "$cmd" in
   stop)
     name="$(slugify "${1:-}")"; [ -n "$name" ] || die "stop needs a <name>"
     [ -f "$STATE_DIR/$name.spawn" ] || die "no session $name"
-    pgid="$(spawn_get "$name" pgid)"
-    if [ -n "$pgid" ]; then
-      kill -- -"$pgid" 2>/dev/null || true          # whole process group: subshell, script/claude, the tail
-    else                                              # pre-pgid .spawn: best-effort fallback
+    pgid="$(spawn_get "$name" pgid)"; launcher="$(spawn_get "$name" launcher)"
+    leader="${pgid:-$launcher}"; recorded="$(spawn_get "$name" leader_start)"; pids=""
+    if [ -n "$leader" ] && { { [ -n "$recorded" ] && [ "$(leader_start "$leader")" = "$recorded" ]; } ||
+         { [ -z "$recorded" ] && ps -o command= -p "$leader" 2>/dev/null | grep -q "claude-remote-spawn"; }; }; then
+      if [ -n "$pgid" ]; then pids="$(proc_tree "$pgid")"; else pids="$(proc_tree "" "$launcher")"; fi
+      pids="$(printf '%s\n' $pids | awk -v me="$$" '$0 != "" && $0 != me')"
+    elif [ -z "$leader" ]; then
       sp="$(spawn_get "$name" subshell)"
-      if is_running "$sp"; then pkill -P "$sp" 2>/dev/null || true; kill "$sp" 2>/dev/null || true; fi
+      if is_running "$sp"; then pids="$sp $(proc_tree "" "$sp")"; fi
     fi
-    # trailing space anchors the name (launch always passes args after it) so 'alpha' ≠ 'alphabet'
-    pkill -f "remote-control $name " 2>/dev/null || true
+    [ -n "$pids" ] || echo "note: $name's recorded process is gone or no longer its own; nothing killed" >&2
     rm -f "$STATE_DIR/$name.spawn" "$STATE_DIR/$name.log" "$STATE_DIR/$name.cmd"
     keepawake_sync
     echo "stopped $name"
+    [ -z "$pids" ] || kill $pids 2>/dev/null || true
     ;;
   check)
     echo "claude : $([ -n "$CLAUDE" ] && "$CLAUDE" --version 2>/dev/null || echo 'NOT FOUND')"

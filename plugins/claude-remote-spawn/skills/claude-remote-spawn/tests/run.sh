@@ -8,7 +8,7 @@ mkdir -p "$ROOT/bin"
 cat > "$ROOT/bin/claude" <<'EOF'
 #!/usr/bin/env bash
 [ -n "${CRS_ARGV_CAP:-}" ] && printf '<%s>\n' "$@" > "$CRS_ARGV_CAP"
-[ -n "${CRS_ENV_CAP:-}" ] && env | grep -E '^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_|CLAUDE_CONFIG_DIR)' | sort > "$CRS_ENV_CAP"
+[ -n "${CRS_ENV_CAP:-}" ] && env | grep -E '^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_|CLAUDE_CONFIG_DIR|TRACEPARENT)' | sort > "$CRS_ENV_CAP"
 echo "stubbed-1.0"
 exit 0
 EOF
@@ -323,6 +323,7 @@ assert_contains "--remote-control winalpha" "$(cat "$STATE/winalpha.cmd" 2>/dev/
 assert_contains "-n winalpha" "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher sets the display name"
 assert_contains "close-tab" "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher self-closes its tab when the session ends"
 assert_absent "exec " "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher does NOT exec (must regain control to close the tab)"
+assert_contains "unset CLAUDECODE" "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → the launcher drops the launching session's identity, even when run by hand"
 assert_contains "ARGS" "$(cat "$ROOT/osascript.cap" 2>/dev/null)" "24. open → osascript was invoked"
 assert_contains "create tab" "$(cat "$ROOT/osascript.cap" 2>/dev/null)" "24. open (iTerm) → asks for a tab"
 run stop winalpha >/dev/null 2>&1 || true
@@ -533,7 +534,7 @@ assert_contains "procps" "$out" "46. no pgrep/pkill → says to install procps"
 assert_absent "spawned" "$out" "46. no pgrep/pkill → no invisible session recorded"
 assert_contains "procps : NOT FOUND" "$(PATH="$ROOT/bin:$ROOT/noprocps" bash "$DRIVER" check 2>&1)" "46. check → flags missing procps"
 # 47. a spawned session is top-level: none of the launching session's identity reaches it
-MARKERS="CLAUDECODE CLAUDE_PID CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN"
+MARKERS="CLAUDECODE CLAUDE_PID CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN TRACEPARENT"
 export CRS_ENV_CAP="$ROOT/env.cap" CRS_ARGV_CAP="$ROOT/argv47.cap"; rm -f "$CRS_ENV_CAP"
 (for m in $MARKERS; do export "$m=from-parent"; done; export CLAUDE_CONFIG_DIR="$ROOT/account2" CLAUDE_CODE_USE_BEDROCK=1; run spawn toplevel) >/dev/null 2>&1
 for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$CRS_ENV_CAP" ] && break; sleep 0.2; done
@@ -545,6 +546,63 @@ for m in $MARKERS; do
 done
 unset CRS_ENV_CAP CRS_ARGV_CAP; run stop toplevel >/dev/null 2>&1 || true
 
+# 48. stop kills only the session it launched: never a recycled process group, never a namesake elsewhere
+( exec -a "claude --remote-control decoy48 -n decoy48" sleep 30 ) & namesake=$!
+set -m; sleep 30 & stranger=$!; set +m
+printf 'name=decoy48\ncwd=/tmp\nstarted=x\nsubshell=%s\npgid=%s\nleader_start=Thu Jan  1 00:00:00 1970\n' "$stranger" "$stranger" > "$STATE/decoy48.spawn"
+out48=$(run stop decoy48 2>&1); sleep 0.3
+assert_contains "nothing killed" "$out48" "48. a stop that kills nothing says so"
+kill -0 "$stranger" 2>/dev/null && ok "48. a process group recycled by the OS is never killed" || ko "48. a process group recycled by the OS is never killed"
+kill -0 "$namesake" 2>/dev/null && ok "48. a namesake session outside the recorded group is never killed" || ko "48. a namesake session outside the recorded group is never killed"
+kill "$stranger" "$namesake" 2>/dev/null; wait "$stranger" "$namesake" 2>/dev/null
+# 49. stop recognises its session whatever the caller's locale or time zone
+out=$(LANG=fr_FR.UTF-8 LC_ALL=fr_FR.UTF-8 TZ=Pacific/Auckland run spawn locale49); h49="$(echo "$out" | head -1)"
+for _ in $(seq 1 50); do [ -s "$STATE/$h49.spawn" ] && break; sleep 0.1; done
+pg49="$(sed -n 's/^pgid=//p' "$STATE/$h49.spawn" 2>/dev/null | head -1)"; sleep 0.3
+LANG=C LC_ALL=C TZ=UTC run stop "$h49" >/dev/null 2>&1; sleep 0.3
+ps -A -o pgid=,stat= | awk -v g="$pg49" '$1==g && $2 !~ /^Z/' | grep -q . && ko "49. a stop from another locale and time zone still kills the session" || ok "49. a stop from another locale and time zone still kills the session"
+[ -n "$pg49" ] && kill $(ps -A -o pid=,pgid= | awk -v g="$pg49" '$2==g {print $1}') 2>/dev/null
+# 50. stop ends a window session's claude and lets its launcher close the tab
+printf '#!/usr/bin/env bash\necho $$ > "%s"\nexec sleep 30\n' "$ROOT/win50.pid" > "$ROOT/bin/claude-sleep"; chmod +x "$ROOT/bin/claude-sleep"
+: > "$ROOT/osascript.cap"; rm -f "$ROOT/win50.pid"
+out=$(CRS_CLAUDE_BIN="$ROOT/bin/claude-sleep" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" TERM_PROGRAM=iTerm.app bash "$DRIVER" open win50 2>&1)
+bash "$STATE/win50.cmd" >/dev/null 2>&1 & launcher50=$!
+for _ in $(seq 1 50); do [ -s "$ROOT/win50.pid" ] && break; sleep 0.1; done; claude50="$(cat "$ROOT/win50.pid" 2>/dev/null)"
+run stop win50 >/dev/null 2>&1; sleep 0.5
+{ [ -n "$claude50" ] && ! kill -0 "$claude50" 2>/dev/null; } && ok "50. stop ends a window session's claude" || ko "50. stop ends a window session's claude (pid=$claude50)"
+kill -0 "$launcher50" 2>/dev/null && ko "50. the launcher regains control and exits (closing its tab)" || ok "50. the launcher regains control and exits (closing its tab)"
+[ -n "$claude50" ] && kill "$claude50" 2>/dev/null; kill "$launcher50" 2>/dev/null; wait "$launcher50" 2>/dev/null
+# 51. a launcher run by hand after open gave up leaves no half record behind
+rm -f "$ROOT/win50.pid" "$STATE/win51.spawn"
+CRS_CLAUDE_BIN="$ROOT/bin/claude-sleep" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" TERM_PROGRAM=iTerm.app bash "$DRIVER" open win51 >/dev/null 2>&1
+rm -f "$STATE/win51.spawn"; bash "$STATE/win51.cmd" >/dev/null 2>&1 & l51=$!
+for _ in $(seq 1 50); do [ -s "$ROOT/win50.pid" ] && break; sleep 0.1; done
+[ -e "$STATE/win51.spawn" ] && ko "51. a hand-run launcher never writes a record open did not create" || ok "51. a hand-run launcher never writes a record open did not create"
+c51="$(cat "$ROOT/win50.pid" 2>/dev/null)"; [ -n "$c51" ] && kill "$c51" 2>/dev/null; kill "$l51" 2>/dev/null; wait "$l51" 2>/dev/null
+# 52. a relaunched launcher is stopped by its own record, not by the first run's
+rm -f "$ROOT/win50.pid"
+CRS_CLAUDE_BIN="$ROOT/bin/claude-sleep" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" TERM_PROGRAM=iTerm.app bash "$DRIVER" open win52 >/dev/null 2>&1
+bash "$STATE/win52.cmd" >/dev/null 2>&1 & la=$!
+for _ in $(seq 1 50); do [ -s "$ROOT/win50.pid" ] && break; sleep 0.1; done
+kill "$(cat "$ROOT/win50.pid")" 2>/dev/null; wait "$la" 2>/dev/null; rm -f "$ROOT/win50.pid"
+bash "$STATE/win52.cmd" >/dev/null 2>&1 & lb=$!
+for _ in $(seq 1 50); do [ -s "$ROOT/win50.pid" ] && break; sleep 0.1; done; cb="$(cat "$ROOT/win50.pid" 2>/dev/null)"
+run stop win52 >/dev/null 2>&1; sleep 0.5
+{ [ -n "$cb" ] && ! kill -0 "$cb" 2>/dev/null; } && ok "52. stop ends the relaunched session's claude" || ko "52. stop ends the relaunched session's claude (pid=$cb)"
+[ -n "$cb" ] && kill "$cb" 2>/dev/null; kill "$lb" 2>/dev/null; wait "$lb" 2>/dev/null
+# 53. a stale window launcher run after a spawn of the same name never takes over that spawn's record
+rm -f "$ROOT/win50.pid"
+CRS_CLAUDE_BIN="$ROOT/bin/claude-sleep" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" TERM_PROGRAM=iTerm.app bash "$DRIVER" open cross53 >/dev/null 2>&1
+cp "$STATE/cross53.cmd" "$ROOT/stale53.cmd"; run stop cross53 >/dev/null 2>&1
+run spawn cross53 >/dev/null 2>&1; for _ in $(seq 1 50); do [ -s "$STATE/cross53.spawn" ] && break; sleep 0.1; done
+pg53="$(sed -n 's/^pgid=//p' "$STATE/cross53.spawn" 2>/dev/null | head -1)"
+sleep 1.1; bash "$ROOT/stale53.cmd" >/dev/null 2>&1 & l53=$!
+for _ in $(seq 1 50); do [ -s "$ROOT/win50.pid" ] && break; sleep 0.1; done; c53="$(cat "$ROOT/win50.pid" 2>/dev/null)"
+assert_absent "launcher=" "$(cat "$STATE/cross53.spawn" 2>/dev/null)" "53. a window launcher never writes into a spawned session's record"
+run stop cross53 >/dev/null 2>&1; sleep 0.3
+ps -A -o pgid=,stat= | awk -v g="$pg53" '$1==g && $2 !~ /^Z/' | grep -q . && ko "53. stop still ends the spawned session" || ok "53. stop still ends the spawned session"
+[ -n "$pg53" ] && kill $(ps -A -o pid=,pgid= | awk -v g="$pg53" '$2==g {print $1}') 2>/dev/null
+[ -n "$c53" ] && kill "$c53" 2>/dev/null; kill "$l53" 2>/dev/null; wait "$l53" 2>/dev/null
 echo
 echo "PASS=$PASS FAIL=$FAIL"
 rm -rf "$ROOT"
