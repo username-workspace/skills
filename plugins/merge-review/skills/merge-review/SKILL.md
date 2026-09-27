@@ -51,7 +51,7 @@ python3 "${SKILL}" context --repo . --packet   # → context + materialized diff
 python3 "${SKILL}" prior   --repo .            # → the previous pass's state (score + findings) for §2bis
 ```
 
-The `diff_cmd` (and the packet's `diff`) is taken against the merge target as last fetched (`origin/<default>` when it exists) and may be an **incremental delta**: when a previous pass PASSED at a head that is an ancestor of HEAD, only the new commits need review. The delta needs that pass to be recorded on this branch after `context` (which notes the base its diff was taken against), and that base to still be in the current base's history; a rewritten base, another branch, or a pass recorded without `context` means the full diff. Only the *obligation* shrinks — the gate still requires a fresh record at the current HEAD.
+The `diff_cmd` (and the packet's `diff`) is taken against the merge target as last fetched (`<remote>/<default>` when it exists), and `context` reports `base_sha`, the base that diff was taken against. Record a pass with `--base <base_sha>` from the packet the reviewer saw. The obligation may then be an **incremental delta** (only the new commits) when that pass PASSED on this branch, its base is exactly the current base, and its head is an ancestor of HEAD; a rebase or merge of the target, a rewritten or reverted base, another branch, or a pass recorded without `--base` means the full diff. Only the *obligation* shrinks — the gate still requires a fresh record at the current HEAD.
 
 **Fresh-eyes review for the first pass.** The context that wrote a diff scores it too gently; the first review of a diff runs in a clean-context subagent:
 
@@ -208,7 +208,7 @@ When `auto_fix` is on and the score is below threshold, **drive the diff to read
 **The loop:**
 1. Apply the attested fixes (minimal, root-cause — no band-aids; match the project's patterns, naming and commit convention; no AI attribution).
 2. Run `python3 "${SKILL}" verify --repo .` — the fake-green guard. It must pass before you commit (never disable/delete/weaken a test, no `--no-verify`, `|| true`, lowered thresholds). If verify fails, your "fix" is hiding the finding — redo it properly.
-3. Commit the fix, then **review it with a confirmation pass** (§0a: the fix delta since the reviewed head) and `python3 "${SKILL}" record --repo . --score <N> --passed` (drop `--passed` if still below threshold): this records the pass and, at threshold, clears the pre-push gate.
+3. Commit the fix, then **review it with a confirmation pass** (§0a: the fix delta since the reviewed head) and `python3 "${SKILL}" record --repo . --score <N> --passed --base <base_sha>` (the `base_sha` of the packet reviewed; drop `--passed` if still below threshold): this records the pass and, at threshold, clears the pre-push gate.
 4. Repeat until the score is **≥ threshold**, only **contestable** findings remain, or the breaker (two confirmation passes, §0a) trips.
 5. If only contestable findings remain below threshold, the breaker tripped, or the only way to pass is a workaround → **STOP**. Surface the remaining findings and the evidence; do not bypass, do not force-pass. The user decides.
 

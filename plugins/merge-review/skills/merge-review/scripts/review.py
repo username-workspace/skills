@@ -185,10 +185,14 @@ def cmd_record(args):
             sys.exit(1)
     score = int(args.score) if args.score is not None else None
     passed = bool(args.passed) or (score is not None and score >= int(cfg.get("threshold", 80)))
-    pending = prev.get("pending") or {}
+    base = None
+    if args.base:
+        rc, base, _ = run(["git", "rev-parse", "--verify", "--quiet", f"{args.base}^{{commit}}"], repo)
+        if rc != 0:
+            print(f"[merge-review] ✗ --base {args.base} names no commit: nothing recorded")
+            sys.exit(1)
     data = {"branch": cur_branch(repo), "head": sha, "score": score,
-            "passed": passed, "pass": int(prev.get("pass", 0)) + 1, "findings": findings,
-            "base": pending.get("base") if pending.get("head") == sha else None}
+            "passed": passed, "pass": int(prev.get("pass", 0)) + 1, "findings": findings, "base": base}
     write_state(repo, data)
     print(f"[merge-review] recorded pass {data['pass']}: score={score} passed={passed}")
 
@@ -408,18 +412,16 @@ def cmd_context(args):
     prior = read_state(repo) or {}
     diff_range = f"{ref}...HEAD"
     rc, current_base, _ = run(["git", "merge-base", ref, "HEAD"], repo)
-    if (rc == 0 and prior.get("passed") and prior.get("head") not in (None, head_sha(repo))
-            and branch and prior.get("branch") == branch and prior.get("base")
-            and run(["git", "merge-base", "--is-ancestor", prior["base"], current_base], repo)[0] == 0
+    current_base = current_base if rc == 0 else None
+    if (current_base and prior.get("passed") and prior.get("head") not in (None, head_sha(repo))
+            and branch and prior.get("branch") == branch and prior.get("base") == current_base
             and run(["git", "merge-base", "--is-ancestor", prior["head"], "HEAD"], repo)[0] == 0):
         diff_range = f"{prior['head']}..HEAD"   # the OBLIGATION shrinks to the delta; the gate
-    if rc == 0:
-        write_state(repo, {**prior, "pending": {"head": head_sha(repo), "base": current_base}})
     ctx = {"mode": "local", "branch": branch,        # still requires a fresh record at this HEAD
            "base": base, "remote": remote, "forge": forge,
            "threshold": int(cfg.get("threshold", 80)), "auto_fix": bool(cfg.get("auto_fix", True)),
            "inline_review": bool(cfg.get("inline_review", False)),
-           "diff_cmd": f"git diff {diff_range}", "commits": commits,
+           "diff_cmd": f"git diff {diff_range}", "base_sha": current_base, "commits": commits,
            "mr": fetch_mr_context(repo, forge, branch)}
     if args.packet:
         diff = subprocess.run(["git", "diff", diff_range], cwd=repo, capture_output=True).stdout.decode("utf-8", "replace")
@@ -472,7 +474,7 @@ def main():
     r = common("record", cmd_record)
     r.add_argument("--score", type=int)
     r.add_argument("--passed", action="store_true")
-    r.add_argument("--findings"); r.add_argument("--sha")
+    r.add_argument("--findings"); r.add_argument("--sha"); r.add_argument("--base")
     rv = sub.add_parser("resolve")
     rv.add_argument("--cwd", default="")
     rv.add_argument("--transcript", default="")
