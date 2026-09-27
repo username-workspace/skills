@@ -498,4 +498,27 @@ for p in ship-when-done merge-review mr-watchdog proof-of-fix; do
     || ko "20. $p: the documented stage command runs [$line]"
 done
 
+# --- 17b. a bare repository shipped inside a clone is never a source of trusted config -------------
+dE="$ROOT/embedded"; new_repo "$dE"; git init -q --bare "$dE/vendor/evil"
+printf '{"gate":"touch %s"}' "$ROOT/pwned" > "$dE/vendor/evil/ship-when-done.json"
+git -C "$dE" add -A; git -C "$dE" commit -qm "vendor an embedded bare repo"
+python3 "$SHIP" gate --repo "$dE/vendor/evil" --need n17 >/dev/null 2>&1
+[ -e "$ROOT/pwned" ] && ko "17b. a gate from an embedded bare repo never runs" || ok "17b. a gate from an embedded bare repo never runs"
+git -C "$dE/vendor/evil" symbolic-ref HEAD refs/heads/embedded-branch
+git -C "$dE/vendor/evil" config remote.origin.url https://gitlab.com/evil/repo.git
+assert_eq "None gitlab-no" "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import _kernel as k
+e = sys.argv[2]; print(k.cur_branch(e), "gitlab-" + ("yes" if k.detect_forge(e, {}, k.remote_name(e)) == "gitlab" else "no"))' "$REPO_ROOT/lib" "$dE/vendor/evil")" \
+  "17b. no harness git call reads an embedded bare repo's HEAD or config"
+git clone -q --bare "$dW" "$ROOT/real.git"; git -C "$ROOT/real.git" worktree add -q -b feat17b "$ROOT/real-wt"
+printf '{"gate":"echo ran >> %s"}' "$ROOT/gate17b.log" > "$ROOT/real.git/ship-when-done.json"; : > "$ROOT/gate17b.log"
+git -C "$ROOT/real-wt" config user.email t@t.t; git -C "$ROOT/real-wt" config user.name t
+echo w > "$ROOT/real-wt/w.txt"; git -C "$ROOT/real-wt" add -A; git -C "$ROOT/real-wt" commit -qm w
+python3 "$SHIP" gate --repo "$ROOT/real-wt" --need n17 >/dev/null 2>&1
+assert_eq 1 "$(wc -l < "$ROOT/gate17b.log" | tr -d ' ')" "17b. a worktree of a real bare repository keeps its trusted gate"
+dH="$ROOT/hooked"; new_repo "$dH" --remote; git -C "$dH" checkout -q -b feat17b; git init -q --bare "$ROOT/cache17b.git"
+printf '#!/bin/sh\ncd %s && git rev-parse --git-dir >/dev/null\n' "$ROOT/cache17b.git" > "$dH/.git/hooks/pre-commit"; chmod +x "$dH/.git/hooks/pre-commit"
+echo x > "$dH/x.txt"
+assert_contains '"committed": true' "$(python3 "$SHIP" commit --need n17 --repo "$dH" --summary x --type chore 2>&1)" \
+  "17b. the user's own hooks never inherit the guard (a pre-commit hook using a bare cache still works)"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]
