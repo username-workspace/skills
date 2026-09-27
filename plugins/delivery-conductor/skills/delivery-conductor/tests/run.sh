@@ -169,7 +169,7 @@ watch=$(stop "$d" | reason | quoted); bash -c "$watch" >/dev/null 2>&1
 assert_contains "Need ready" "$(stop "$d" | reason)" "14. the need reaches ready"
 assert_eq "True" "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import _kernel as k
 print(k.driven(sys.argv[2], "s1", "p1"))' "$REPO_ROOT/lib" "$d")" "14. its branch stays driven for the rest of that prompt"
-env -u HARNESS_AUTO_ENGAGE bash -c "$(declare -f payload hook); payload '$d' s2 q1 'hi' | hook prompt" >/dev/null
+( unset HARNESS_AUTO_ENGAGE; payload "$d" s2 q1 "hi" | hook prompt ) >/dev/null
 assert_eq "False" "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import _kernel as k
 print(k.driven(sys.argv[2], "s2", "q1"))' "$REPO_ROOT/lib" "$d")" "14. but not for a session out of scope on that branch, which never purges the ledger"
 python3 "$CS" resume --repo "$d" --session s1 --need "$nid" >/dev/null 2>&1; assert_eq 1 "$?" "14. a ready need is past resume"
