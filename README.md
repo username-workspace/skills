@@ -40,8 +40,8 @@ its own.
 | [`remote-control-pilot`](./plugins/remote-control-pilot) | 1.0.0 | Agents | Drive the Claude Code sessions running on your other machines, and read back what they did. |
 | [`delivery-metrics`](./plugins/delivery-metrics) | 1.0.7 | Analytics | Turn git history into a developer productivity & quality dashboard. |
 | [`aws-remote-auth`](./plugins/aws-remote-auth) | 1.0.3 | DevOps | Re-authenticate to AWS from anywhere, on demand, with an autofill device code. |
-| [`mr-watchdog`](./plugins/mr-watchdog) | 3.3.2 | DevOps | Open a merge request, then forget it — a background watcher follows its CI and hands the verdict back to your session. |
-| [`ship-when-done`](./plugins/ship-when-done) | 2.3.1 | DevOps | Commit at each milestone, push so nothing is lost, open the PR when it's actually done. |
+| [`mr-watchdog`](./plugins/mr-watchdog) | 3.3.3 | DevOps | Open a merge request, then forget it — a background watcher follows its CI and hands the verdict back to your session. |
+| [`ship-when-done`](./plugins/ship-when-done) | 2.3.2 | DevOps | Commit at each milestone, push so nothing is lost, open the PR when it's actually done. |
 | [`coding-agent-usage`](./plugins/coding-agent-usage) | 1.2.3 | FinOps | See your AI coding-agent usage — and where you rank against other developers. |
 | [`integrity-audit`](./plugins/integrity-audit) | 1.0.0 | Quality | Hold a codebase to the standard it set for itself. |
 | [`merge-review`](./plugins/merge-review) | 2.3.2 | Quality | An adversarial reviewer that scores the diff, fixes what's attested, and loops until it's merge-ready. |
