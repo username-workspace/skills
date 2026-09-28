@@ -197,4 +197,54 @@ PY
 kept=$(python3 -c 'import json,sys; print(" ".join(sorted(json.load(open(sys.argv[1]))["sessions"])))' "$d13/.git/proof-of-fix.json")
 assert_eq "A" "$kept" "11. the session GC keeps a need-bound repro and collects the stale one"
 
+# --- 12. schema v2: probes keyed by need and criterion, red bound to a work state, files pinned ----
+cstage(){ python3 "$REPRO" stage --repo "$1" --need N2 --stage "$2" --criteria "$3" | python3 -c 'import json,sys; d=json.load(sys.stdin)
+print(d["stage"], d["state"], d["next"]["kind"])'; }
+cinstr(){ python3 "$REPRO" stage --repo "$1" --need N2 --stage "$2" --criteria "$3" | python3 -c 'import json,sys; print(json.load(sys.stdin)["next"].get("instruction", ""))'; }
+d14="$ROOT/t14"; mkrepo "$d14"
+assert_eq "contracting pending skill" "$(cstage "$d14" contracting c1,c2)" "12. no probe yet → contracting asks for them"
+assert_contains "--criterion c1" "$(cinstr "$d14" contracting c1,c2)" "12. and names the record command per open criterion"
+python3 "$REPRO" stage --repo "$d14" --need N2 --stage contracting >/dev/null 2>&1; rc=$?
+assert_eq 2 "$rc" "12. contracting without the contract's criteria is refused, never a silent done"
+python3 "$REPRO" stage --repo "$d14" --need N2 --stage proving >/dev/null 2>&1; rc=$?
+assert_eq 2 "$rc" "12. proving without criteria or sessions is refused"
+python3 "$REPRO" record --repo "$d14" --need N2 --criterion c1 --cmd "true" >/dev/null 2>&1; rc=$?
+assert_eq 1 "$rc" "12. a passing probe is refused"
+out=$(python3 "$REPRO" record --repo "$d14" --need N2 --criterion c1 --file tests/c1.sh --cmd "bash tests/c1.sh" 2>&1); rc=$?
+assert_eq 1 "$rc" "12. a declared probe file that does not exist is refused (red would mean missing)"
+assert_contains "tests/c1.sh" "$out" "12. and the refusal names it"
+mkdir -p "$d14/tests"; echo 'test -f feature.txt' > "$d14/tests/c1.sh"
+python3 "$REPRO" record --repo "$d14" --need N2 --criterion c1 --file tests/c1.sh --cmd "bash tests/c1.sh" >/dev/null 2>&1; rc=$?
+assert_eq 0 "$rc" "12. a failing probe is recorded on a dirty tree, its file pinned"
+assert_eq "$(git -C "$d14" rev-parse HEAD)" "$(python3 "$REPRO" status --repo "$d14" --need N2 | python3 -c 'import json,sys; print(json.load(sys.stdin)["c1"]["red"]["head"])')" "12. red is bound to the work state it failed at"
+assert_eq "contracting pending skill" "$(cstage "$d14" contracting c1,c2)" "12. c2 still open"
+python3 "$REPRO" waive --repo "$d14" --need N2 --criterion c2 >/dev/null 2>&1; rc=$?
+assert_eq 2 "$rc" "12. a waiver needs a reason"
+python3 "$REPRO" waive --repo "$d14" --need N2 --criterion c2 --reason "docs only" >/dev/null
+assert_eq "contracting done none" "$(cstage "$d14" contracting c1,c2)" "12. every criterion has a probe or a waiver → done"
+assert_eq "proving pending background" "$(cstage "$d14" proving c1,c2)" "12. unchecked → the background check"
+python3 "$REPRO" check --repo "$d14" --need N2 >/dev/null 2>&1; rc=$?
+assert_eq 1 "$rc" "12. check fails while a criterion is red"
+assert_eq "proving blocked skill" "$(cstage "$d14" proving c1,c2)" "12. red at this work state → a fix step"
+touch "$d14/feature.txt"
+python3 "$REPRO" check --repo "$d14" --need N2 >/dev/null 2>&1; rc=$?
+assert_eq 0 "$rc" "12. green once implemented (the waived criterion is not run)"
+assert_eq "proving done none" "$(cstage "$d14" proving c1,c2)" "12. every probe green at this work state → done"
+echo 'true' > "$d14/tests/c1.sh"
+python3 "$REPRO" check --repo "$d14" --need N2 >/dev/null 2>&1; rc=$?
+assert_eq 1 "$rc" "12. a pinned probe file edited after its red run fails the check"
+assert_contains "re-record" "$(cinstr "$d14" proving c1,c2)" "12. and proving asks to record it again"
+python3 "$REPRO" record --repo "$d14" --session A --cmd "false" >/dev/null 2>&1
+assert_contains '"c2"' "$(python3 "$REPRO" status --repo "$d14" --need N2)" "12. a v1 session write keeps the need-keyed probes"
+python3 "$REPRO" forget --repo "$d14" --need N2 >/dev/null
+assert_eq "{}" "$(python3 "$REPRO" status --repo "$d14" --need N2)" "12. forget drops a need's probes"
+
+# --- 13. a probe that cannot be red is recorded red-waived, with its reason ------------------------
+d15="$ROOT/t15"; mkrepo "$d15"; echo x > "$d15/done.txt"
+python3 "$REPRO" record --repo "$d15" --need N3 --criterion c1 --cmd "test -f done.txt" >/dev/null 2>&1; rc=$?
+assert_eq 1 "$rc" "13. already true → refused without a reason"
+python3 "$REPRO" record --repo "$d15" --need N3 --criterion c1 --cmd "test -f done.txt" --red-waived "true before the need" >/dev/null 2>&1; rc=$?
+assert_eq 0 "$rc" "13. recorded red-waived with its reason"
+assert_contains '"waived": "true before the need"' "$(python3 "$REPRO" status --repo "$d15" --need N3)" "13. the reason is kept for the report"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]
