@@ -363,8 +363,9 @@ signal.signal(signal.SIGTERM, signal.SIG_IGN)
 http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), http.server.SimpleHTTPRequestHandler).serve_forever()
 PY
 serve_cfg "$d20" "{\"cmd\": \"python3 $ROOT/stubborn.py \$PORT; true\", \"timeout\": 20}"
-python3 "$REPRO" check --repo "$d20" --need N8 >/dev/null 2>&1; rc=$?
+out=$(python3 "$REPRO" check --repo "$d20" --need N8 2>&1); rc=$?
 assert_eq 0 "$rc" "17. a target whose child ignores SIGTERM still serves the check"
+[ "$rc" = 0 ] || printf '%s\n' "$out" | tail -8
 assert_eq 0 "$(ps -Ao command | grep -c "[s]tubborn.py")" "17. and its whole group is stopped, the stubborn child too"
 serve_cfg "$d20" "{\"cmd\": \"python3 -c 'import subprocess, sys; open(\\\"$ROOT/orphan.pid\\\", \\\"w\\\").write(str(subprocess.Popen([sys.executable, \\\"-m\\\", \\\"http.server\\\", \\\"$port\\\", \\\"--bind\\\", \\\"127.0.0.1\\\"], cwd=\\\"$d20\\\", start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).pid))'\", \"base_url\": \"http://127.0.0.1:$port\", \"timeout\": 10}"
 out=$(python3 "$REPRO" check --repo "$d20" --need N8 2>&1); rc=$?
