@@ -283,4 +283,53 @@ payload "$d" s1 p24 "hi" | hook prompt >/dev/null
 assert_eq "{}" "$(python3 "$POF" status --repo "$d" --need h1)" "24. the probes of a need gone from the history are forgotten"
 assert_eq "h2" "$(ledger "$d" "['history'][0]['id']")" "24. the history keeps the last 20"
 
+# 25. the report reads each probe's evidence whole, however verbose the probe
+d="$ROOT/r25"; new_repo "$d"
+nid=$(python3 "$CS" open --repo "$d" --session s1 --summary "add a greeting" --criterion "hello.txt says hello" | python3 -c 'import json,sys; print(json.load(sys.stdin)["need"])')
+python3 "$POF" record --repo "$d" --need "$nid" --criterion c1 \
+  --cmd "python3 -c \"import os,sys; sys.stderr.write('x' * 3000); sys.exit(0 if os.path.exists('hello.txt') else 1)\"" >/dev/null 2>&1
+stop "$d" >/dev/null; echo hello > "$d/hello.txt"
+gate=$(stop "$d" | reason | quoted); bash -c "$gate" >/dev/null 2>&1
+check=$(stop "$d" | reason | quoted); bash -c "$check" >/dev/null 2>&1
+python3 "$REPO_ROOT/plugins/merge-review/skills/merge-review/scripts/review.py" record --repo "$d" --sha HEAD --score 95 >/dev/null
+watch=$(stop "$d" | reason | quoted); bash -c "$watch" >/dev/null 2>&1
+out=$(stop "$d" | reason)
+assert_contains "red (exit 1)" "$out" "25. a verbose probe's red run is in the report"
+assert_contains "green at" "$out" "25. and its green run"
+
+# 26. driven time: every active interval counts once, blocked time never
+d="$ROOT/r26"; new_repo "$d"; nid=$(open_need "$d")
+backdate(){ python3 -c 'import json,sys; from datetime import datetime,timedelta,timezone
+p=sys.argv[1]+"/.git/conductor.json"; l=json.load(open(p)); n=l["needs"][sys.argv[2]]
+n["active_since"]=(datetime.now(timezone.utc)-timedelta(hours=float(sys.argv[3]))).isoformat(timespec="seconds"); json.dump(l, open(p,"w"))' "$d" "$nid" "$1"; }
+driven(){ python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import json, conductor
+print(int(conductor.driven_seconds(json.load(open(sys.argv[2]+"/.git/conductor.json"))["needs"][sys.argv[3]]) // 60))' "$(dirname "$CS")" "$d" "$nid"; }
+backdate 2; python3 "$CS" halt --repo "$d" --session s1 >/dev/null
+assert_eq 120 "$(driven)" "26. halt closes the active interval"
+python3 "$CS" resume --repo "$d" --session s1 >/dev/null; backdate 1
+python3 "$CS" resume --repo "$d" --session s1 >/dev/null
+assert_eq 180 "$(driven)" "26. resuming a need already active keeps its time"
+backdate 0.5; python3 "$CS" halt --repo "$d" --session s1 >/dev/null
+assert_eq 210 "$(driven)" "26. every active interval adds up"
+
+# 27. tokens: only while the need was driven, each message once across its sessions' files
+python3 - "$ROOT/tok" "$(dirname "$CS")" <<'PY'
+import json, os, sys
+root = sys.argv[1]
+os.makedirs(f"{root}/p/s1/subagents/workflows/wf_1", exist_ok=True)
+def entry(mid, ts, n, model="m"):
+    return json.dumps({"timestamp": ts, "message": {"id": mid, "model": model, "usage": {"input_tokens": n, "output_tokens": 0}}})
+open(f"{root}/p/s1.jsonl", "w").write("\n".join([entry("a", "2026-01-01T10:30:00.000Z", 10), entry("b", "2026-01-01T12:30:00.000Z", 5000),
+    entry("c", "2026-01-01T14:30:00.000Z", 100), entry("s", "2026-01-01T10:31:00.000Z", 7, "<synthetic>")]) + "\n")
+open(f"{root}/p/s2.jsonl", "w").write(entry("a", "2026-01-01T10:30:00.000Z", 10) + "\n")
+open(f"{root}/p/s1/subagents/workflows/wf_1/agent-x.jsonl", "w").write(entry("w", "2026-01-01T10:40:00.000Z", 1) + "\n")
+PY
+tok=$(python3 - "$ROOT/tok" "$(dirname "$CS")" <<'PY'
+import sys; sys.path.insert(0, sys.argv[2]); import conductor
+windows = [["2026-01-01T10:00:00+00:00", "2026-01-01T11:00:00+00:00"], ["2026-01-01T14:00:00+00:00", "2026-01-01T15:00:00+00:00"]]
+print(conductor.usage(sys.argv[1] + "/p/s1.jsonl", ["s1", "s2"], windows))
+PY
+)
+assert_eq "{'m': [111, 0, 0, 0]}" "$tok" "27. tokens inside the driven windows only, a copied message once, workflow agents included, no synthetic line"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]

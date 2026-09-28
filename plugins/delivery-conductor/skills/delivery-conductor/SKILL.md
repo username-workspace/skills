@@ -19,7 +19,7 @@ that is not done:
 | contracting | proof-of-fix | every criterion of the need has a probe recorded failing, or a waiver |
 | implementing | ship-when-done | the work is committed and the branch is ahead of its base |
 | gating | ship-when-done | the project gate passed at this work state |
-| proving | proof-of-fix | every repro the need's sessions recorded passes at this work state |
+| proving | proof-of-fix | every probe of the need (its criteria's, and any repro its sessions recorded) passes at this work state |
 | reviewing | merge-review | a review recorded for the exact HEAD scores at or above the threshold |
 | shipping | ship-when-done | declared, pushed at HEAD, PR/MR open |
 | ci | mr-watchdog | the watcher's verdict for the exact HEAD is green |
