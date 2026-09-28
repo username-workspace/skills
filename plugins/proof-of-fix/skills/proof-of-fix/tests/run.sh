@@ -247,4 +247,63 @@ python3 "$REPRO" record --repo "$d15" --need N3 --criterion c1 --cmd "test -f do
 assert_eq 0 "$rc" "13. recorded red-waived with its reason"
 assert_contains '"waived": "true before the need"' "$(python3 "$REPRO" status --repo "$d15" --need N3)" "13. the reason is kept for the report"
 
+# --- 14. one proving verdict for both schemas: a v1 caller never proves a need whose v2 probes are red
+d16="$ROOT/t16"; mkrepo "$d16"; mkdir -p "$d16/tests"; echo 'test -f feature.txt' > "$d16/tests/c1.sh"
+python3 "$REPRO" record --repo "$d16" --need N4 --criterion c1 --file tests/c1.sh --cmd "bash tests/c1.sh" >/dev/null 2>&1
+v1stage(){ python3 "$REPRO" stage --repo "$1" --need N4 --sessions "$2" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["state"])'; }
+assert_eq "pending" "$(v1stage "$d16" S1)" "14. a stage asked by sessions still counts the need's recorded criteria"
+python3 "$REPRO" check --repo "$d16" --need N4 --session S1 >/dev/null 2>&1; rc=$?
+assert_eq 1 "$rc" "14. the conductor's v1 check command runs the need's red probe too"
+assert_eq "blocked" "$(v1stage "$d16" S1)" "14. and proving reads it red"
+python3 "$REPRO" record --repo "$d16" --session S1 --need N4 --cmd "test -f bug-fixed.txt" >/dev/null 2>&1
+touch "$d16/feature.txt"
+python3 "$REPRO" check --repo "$d16" --need N4 --session S1 >/dev/null 2>&1; rc=$?
+assert_eq 1 "$rc" "14. a need-bound session repro still red fails the check"
+touch "$d16/bug-fixed.txt"
+python3 "$REPRO" check --repo "$d16" --need N4 --session S1 >/dev/null 2>&1; rc=$?
+assert_eq 0 "$rc" "14. both green → the check passes"
+assert_eq "done" "$(v1stage "$d16" S1)" "14. and proving is done only now"
+
+# --- 15. the v2 proving invariants: moved tree, stale green, missing criterion, red's work state ---
+d17="$ROOT/t17"; mkrepo "$d17"; echo 0 > "$d17/run.log"; git -C "$d17" add -A; git -C "$d17" commit -qm log
+python3 "$REPRO" record --repo "$d17" --need N5 --criterion c1 --cmd 'echo x >> run.log; test -f f.txt' >/dev/null 2>&1
+touch "$d17/f.txt"; cp "$d17/run.log" "$ROOT/run17.before"
+python3 "$REPRO" check --repo "$d17" --need N5 >/dev/null 2>&1; rc=$?
+assert_eq 1 "$rc" "15. a probe that moves the tree while it runs proves nothing"
+assert_eq "proving pending background" "$(python3 "$REPRO" stage --repo "$d17" --need N5 --criteria c1 | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["stage"], d["state"], d["next"]["kind"])')" "15. and proving stays pending"
+cp "$ROOT/run17.before" "$d17/run.log"
+assert_eq "pending" "$(python3 "$REPRO" stage --repo "$d17" --need N5 --criteria c1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')" "15. even once the tree is back where the unstable check started"
+d18="$ROOT/t18"; mkrepo "$d18"; echo dirty > "$d18/wip.txt"
+python3 "$REPRO" record --repo "$d18" --need N6 --criterion c1 --cmd 'test -f g.txt' >/dev/null 2>&1
+assert_eq "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import repro; print(repro.work_state(sys.argv[2])[1])' "$(dirname "$REPRO")" "$d18")" \
+  "$(python3 "$REPRO" status --repo "$d18" --need N6 | python3 -c 'import json,sys; print(json.load(sys.stdin)["c1"]["red"]["dirty"])')" "15. red carries the dirty state it failed at"
+touch "$d18/g.txt"; git -C "$d18" add -A; git -C "$d18" commit -qm impl
+python3 "$REPRO" check --repo "$d18" --need N6 >/dev/null 2>&1
+echo later > "$d18/later.txt"; git -C "$d18" add -A
+assert_eq "pending" "$(python3 "$REPRO" stage --repo "$d18" --need N6 --criteria c1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')" "15. a change after a green check makes it stale"
+assert_eq "blocked" "$(python3 "$REPRO" stage --repo "$d18" --need N6 --criteria c1,c9 | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')" "15. a contract criterion with no probe is never proven"
+
+# --- 16. the CLI contract of the need-keyed commands --------------------------------------------------
+d19="$ROOT/t19 x"; mkrepo "$d19"; mkdir -p "$d19/tests"; echo 'test -f h.txt' > "$d19/tests/{id}.sh"
+python3 "$REPRO" record --repo "$d19" --need N7 --criterion c1 --file 'tests/{id}.sh' --cmd 'bash "tests/{id}.sh"' >/dev/null 2>&1
+echo 'true' > "$d19/tests/{id}.sh"; python3 "$REPRO" check --repo "$d19" --need N7 >/dev/null 2>&1
+out=$(python3 "$REPRO" stage --repo "$d19" --need N7 --criteria c1 2>&1)
+assert_absent "Traceback" "$out" "16. a pinned path with braces never crashes the instruction"
+rerecord=$(printf '%s' "$out" | python3 -c 'import json,re,sys; print(re.search(r"`([^`]+)`", json.load(sys.stdin)["next"]["instruction"]).group(1))')
+echo 'test -f h.txt' > "$d19/tests/{id}.sh"
+assert_contains "record --repo" "$rerecord" "16. proving names the full re-record command"
+bash -c "$rerecord" >/dev/null 2>&1; rc=$?
+assert_eq 0 "$rc" "16. the re-record command it names runs as written, in a path with a space"
+cmd=$(python3 "$REPRO" stage --repo "$d19" --need N7 --stage contracting --criteria c2 | python3 -c 'import json,re,sys; print(re.search(r"`([^`]+)`", json.load(sys.stdin)["next"]["instruction"]).group(1))')
+assert_contains "t19 x' --need" "$cmd" "16. contracting's commands quote the repo path"
+out=$(python3 "$REPRO" waive --repo "$d19" --need N7 --criterion c2 --reason '  ' 2>&1); rc=$?
+assert_eq 2 "$rc" "16. a blank waiver reason is refused"
+python3 "$REPRO" record --repo "$d19" --need N7 --criterion c3 --cmd true --red-waived ' ' >/dev/null 2>&1; rc=$?
+assert_eq 2 "$rc" "16. a blank red-waived reason is refused"
+echo x > "$ROOT/outside.sh"
+python3 "$REPRO" record --repo "$d19" --need N7 --criterion c4 --file ../outside.sh --cmd false >/dev/null 2>&1; rc=$?
+assert_eq 1 "$rc" "16. a probe file outside the repo is refused"
+python3 "$REPRO" record --repo "$d19" --need N7 --cmd false --file tests/x.sh >/dev/null 2>&1; rc=$?
+assert_eq 2 "$rc" "16. --file without --criterion is refused, never dropped"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]

@@ -124,7 +124,7 @@ plugin degrades to inert rather than crash.
 | `mr-watchdog-session.json` | mr-watchdog | session baselines (engagement) |
 | `mr-watchdog-watch.json` | mr-watchdog | per-HEAD watch dedup |
 | `mr-watchdog-verdict.json` | mr-watchdog | the watcher's last verdict (green, red + log, stopped + reason), bound to the sha it watched |
-| `proof-of-fix.json` | proof-of-fix | each session's active repro (command + recorded red verdict) |
+| `proof-of-fix.json` | proof-of-fix | each session's active repro (command + recorded red verdict), and each need's probes by criterion (red work state, pinned files, waivers, checks) |
 | `conductor.json` | delivery-conductor | the need ledger: which branches a need holds (read by every sibling through `driven()`) |
 
 This lists the coupling and observability state. Per-session nudge-dedup markers (e.g.
@@ -211,7 +211,7 @@ on, so a new HEAD sends the need back to the earliest stale stage by constructio
 |---|---|---|
 | implementing | ship-when-done | the work is committed and the branch is ahead of its base |
 | gating | ship-when-done | `gate` passed at this work state, the tree unchanged while it ran |
-| proving | proof-of-fix | every repro the need's sessions recorded passed at this work state |
+| proving | proof-of-fix | every probe of the need (its criteria's, and the repros its sessions recorded) passed at this work state |
 | reviewing | merge-review | a record for the exact HEAD, score at or above the threshold |
 | shipping | ship-when-done | declared (`mark-done`), pushed at HEAD, PR/MR open |
 | ci | mr-watchdog | the watcher's verdict for the exact HEAD is green |

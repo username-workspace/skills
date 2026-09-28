@@ -100,8 +100,9 @@ silent done. The report is v1: the stage's `state` (`done`, `pending`, `blocked`
 or `skill`). A repo that opted this plugin out gets `{"enabled": false}` from it. See
 `docs/architecture.md` in the marketplace.
 
-Every command acts on the calling session (`CLAUDE_CODE_SESSION_ID`, set in Claude Code's shell). From a
-plain terminal pass `--session <id>`; `status` and `clear` name the sessions holding an open repro.
+A session repro belongs to the calling session (`CLAUDE_CODE_SESSION_ID`, set in Claude Code's shell).
+From a plain terminal pass `--session <id>`; `status` and `clear` name the sessions holding an open
+repro. The commands given `--need` and `--criterion` act on the need, whichever session runs them.
 
 ## Composes with the delivery harness
 
