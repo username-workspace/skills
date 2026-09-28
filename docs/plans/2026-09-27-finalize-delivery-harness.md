@@ -4,6 +4,37 @@ State on 2026-09-27, main at `e00ebe2`. This plan lists what is left to finish P
 [the autonomous-delivery plan](2026-09-26-autonomous-delivery.md), the correctness gaps found on the way,
 the decisions still pending, and the later phases. Each item names its acceptance evidence.
 
+## Status on 2026-09-28: Phase 1 closed
+
+Main at `8828af2`. Every section below except 6 landed; what did not is listed under "Carried forward".
+
+| Section | Landed in | Evidence |
+|---|---|---|
+| 1. Conductor | #89 | a need goes from `open` to `ready` through the real stage CLIs, survives a compaction and a halt; 64 conductor cases |
+| 1. Open question 3 | #89 | the driven reviewer subagent carries `need:<id>` in its description and the conductor waits on it |
+| 2. E2E ledger | #90 | `needs` space (ready, halt then resume, a follow-up reopened on its PR/MR); 65/65 situations per forge at harness `210ec0b` |
+| 3. Review gaps 1 to 3 | #85 | review against `<remote>/<default>`, a delta only while the recorded base holds, a non-UTF-8 diff in the packet |
+| 4. Embedded bare repository | #87 | a git dir inside a working tree is never a trusted config source |
+| 4. claude-remote-spawn `stop` | #86 | kills only the session it launched, window sessions included |
+| 5. Smaller fixes | #86, #88, #89 | fork MRs, tri-state MR lookup, inert bad presence file, `TRACEPARENT`, the nested-worktree limit documented |
+
+Also in #89, from its review: every owner measures a need against the base it was cut from
+(`base_ref()` in the kernel), a need branch never tracks the base (a fork clone ships to its own
+remote), and a closed need holds its branch only through the prompt that closed it (`need_holds()`).
+
+### Carried forward
+
+- **Installing delivery-conductor** is a decision for the owner: it is merged but not installed, and
+  once installed every in-scope session is nudged to open a need.
+- **Re-entry after a background step** relies on the task notification that re-invokes the session;
+  the one-shot `CronCreate` wake-up of the plan is not built.
+- **The `ready` report** carries the need, its branch and each stage's evidence, not time or cost.
+- **Reopen on a closed PR/MR**: `reopen` trusts the local PR record and never asks the forge, so a
+  follow-up after a merge would push to a dead branch.
+- **merge-review policy**: "documentation" is still undefined (section 5).
+- **E2E driver**: the conductor's "ran out of hook time" continuation fails the scenario instead of
+  continuing; `conductor_hook`'s fail-loud contract is proven by offline repros only.
+
 ## Where things stand
 
 | PR | Merged | What it settled |
