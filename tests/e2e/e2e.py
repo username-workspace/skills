@@ -25,6 +25,7 @@ WATCH = os.path.join(SKILLS, "plugins/mr-watchdog/skills/mr-watchdog/scripts/wat
 SHIP_HOOK = os.path.join(SKILLS, "plugins/ship-when-done/hooks/stop-hook.py")
 SHIP_PLUGIN = os.path.join(SKILLS, "plugins/ship-when-done")
 CONDUCTOR = os.path.join(SKILLS, "plugins/delivery-conductor/skills/delivery-conductor/scripts/conductor.py")
+POF = os.path.join(SKILLS, "plugins/proof-of-fix/skills/proof-of-fix/scripts/repro.py")
 HARNESS = ("plugins/ship-when-done", "plugins/merge-review", "plugins/mr-watchdog", "plugins/proof-of-fix",
            "plugins/delivery-conductor", "lib")
 E2E_REPO = "username-workspace/harness-e2e"      # same path on github.com and gitlab.com
@@ -614,6 +615,9 @@ def open_need(tag, name):
     need = conductor_cli("the conductor opens the need", "open", "--repo", workdir, "--session", session,
                          "--summary", f"e2e need {name}", "--type", "feat", "--criterion", f"{name}.txt exists",
                          "--prompt", f"E2E need {name} ({tag})")
+    rc, out, err = sh([sys.executable, POF, "record", "--repo", workdir, "--need", need["need"], "--criterion", "c1",
+                       "--cmd", f"test -f {name}.txt"])
+    expect(rc == 0, "the criterion's probe is recorded, failing, before the work", out + err)
     return workdir, session, need["branch"]
 
 

@@ -209,6 +209,7 @@ on, so a new HEAD sends the need back to the earliest stale stage by constructio
 
 | Stage | Owner | Done when |
 |---|---|---|
+| contracting | proof-of-fix | every criterion of the need has a probe recorded failing (bound to its work state, its files pinned) or a waiver |
 | implementing | ship-when-done | the work is committed and the branch is ahead of its base |
 | gating | ship-when-done | `gate` passed at this work state, the tree unchanged while it ran |
 | proving | proof-of-fix | every probe of the need (its criteria's, and the repros its sessions recorded) passed at this work state |

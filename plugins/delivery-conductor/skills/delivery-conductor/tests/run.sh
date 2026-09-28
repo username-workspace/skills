@@ -6,6 +6,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 PL="$(cd "$HERE/../../.." && pwd)"
 CS="$PL/skills/delivery-conductor/scripts/conductor.py"
 REPO_ROOT="$(cd "$PL/../.." && pwd)"
+POF="$REPO_ROOT/plugins/proof-of-fix/skills/proof-of-fix/scripts/repro.py"
 ROOT="$(mktemp -d)"
 . "$(cd "$(dirname "$0")" && git rev-parse --show-toplevel)/tests/lib.sh"
 export HARNESS_AUTO_ENGAGE=1 HARNESS_LIVE_DIR="$ROOT/live" CLAUDE_PID=4242
@@ -34,16 +35,17 @@ new_repo(){ local d="$1"; git init -q -b main "$d"
   git -C "$d" push -q -u origin main 2>/dev/null
   printf '{"gate":"true"}' > "$d/.git/ship-when-done.json"; }
 hook(){ CLAUDE_PLUGIN_ROOT="$PL" python3 "$PL/hooks/hook.py" "$1"; }
-payload(){ # $1=repo $2=session $3=prompt_id [$4=prompt] [$5=background_tasks] [$6=source]
+payload(){ # $1=repo $2=session $3=prompt_id [$4=prompt] [$5=background_tasks] [$6=source] [$7=transcript]
   python3 -c 'import json,sys; a=sys.argv[1:]
-print(json.dumps({"session_id": a[1], "cwd": a[0], "prompt_id": a[2], "prompt": a[3], "transcript_path": "",
-  "stop_hook_active": False, "background_tasks": json.loads(a[4] or "[]"), "source": a[5]}))' "$1" "$2" "$3" "${4:-}" "${5:-}" "${6:-}"; }
+print(json.dumps({"session_id": a[1], "cwd": a[0], "prompt_id": a[2], "prompt": a[3], "transcript_path": a[6],
+  "stop_hook_active": False, "background_tasks": json.loads(a[4] or "[]"), "source": a[5]}))' "$1" "$2" "$3" "${4:-}" "${5:-}" "${6:-}" "${7:-}"; }
 stop(){ payload "$1" "${2:-s1}" "${3:-p1}" "" "${4:-}" | hook stop; }
 reason(){ python3 -c 'import json,sys; t=sys.stdin.read().strip(); print(json.loads(t).get("reason","") if t else "")'; }
 quoted(){ python3 -c 'import re,sys; m=re.search(r"`([^`]+)`", sys.stdin.read()); print(m.group(1) if m else "")'; }
 ledger(){ python3 -c 'import json,sys; print(json.load(open(sys.argv[1]+"/.git/conductor.json"))'"$2"')' "$1"; }
-open_need(){ python3 "$CS" open --repo "$1" --session "${2:-s1}" --summary "add a greeting" --criterion "hello.txt says hello" \
-  --prompt "add a greeting" | python3 -c 'import json,sys; print(json.load(sys.stdin)["need"])'; }
+open_need(){ local n; n=$(python3 "$CS" open --repo "$1" --session "${2:-s1}" --summary "add a greeting" --criterion "hello.txt says hello" \
+  --prompt "add a greeting" | python3 -c 'import json,sys; print(json.load(sys.stdin)["need"])')
+  python3 "$POF" waive --repo "$1" --need "$n" --criterion c1 --reason "not what this case proves" >/dev/null; echo "$n"; }
 
 echo "delivery-conductor"
 
@@ -120,9 +122,9 @@ assert_eq "{}" "$(ledger "$d" "['needs']")" "7. release takes it out of the ledg
 
 # 8. open refuses what it cannot drive, and a corrupt ledger is surfaced, never a traceback
 d="$ROOT/r8"; new_repo "$d"; echo dirty > "$d/x.txt"
-python3 "$CS" open --repo "$d" --session s1 --summary x >/dev/null 2>&1; assert_eq 1 "$?" "8. open refuses a tree with changes the need did not produce"
+python3 "$CS" open --repo "$d" --session s1 --summary x --criterion y >/dev/null 2>&1; assert_eq 1 "$?" "8. open refuses a tree with changes the need did not produce"
 rm "$d/x.txt"
-env -u HARNESS_AUTO_ENGAGE python3 "$CS" open --repo "$d" --session s1 --summary x >/dev/null 2>&1; assert_eq 1 "$?" "8. open refuses a repo outside the AUTO scope"
+env -u HARNESS_AUTO_ENGAGE python3 "$CS" open --repo "$d" --session s1 --summary x --criterion y >/dev/null 2>&1; assert_eq 1 "$?" "8. open refuses a repo outside the AUTO scope"
 echo '{not json' > "$d/.git/conductor.json"
 out=$(stop "$d")
 assert_contains "systemMessage" "$out" "8. a corrupt ledger is surfaced at Stop"
@@ -134,7 +136,7 @@ nid=$(open_need "$d")
 assert_contains "Implement need $nid" "$(stop "$d" | reason)" "9. a need opened on a branch with commits still starts with no work of its own"
 
 # 10. one need per worktree; a mismatch is bounded; another session on a driven branch is not nudged to open
-python3 "$CS" open --repo "$d" --session s9b --summary other >/dev/null 2>&1; assert_eq 1 "$?" "10. a second need in the same worktree is refused"
+python3 "$CS" open --repo "$d" --session s9b --summary other --criterion y >/dev/null 2>&1; assert_eq 1 "$?" "10. a second need in the same worktree is refused"
 assert_eq "" "$(payload "$d" s9b q1 "do something else" | hook prompt)" "10. another session on a driven branch is not nudged to open a need"
 git -C "$d" checkout -q main
 for i in 1 2; do stop "$d" s1 m1 >/dev/null; done
@@ -179,7 +181,7 @@ assert_eq "{}" "$(ledger "$d" "['needs']")" "14. the next prompt hands the branc
 # 15. the prompt a need opens with is the one the hook captured, never a transcription
 d="$ROOT/r15"; new_repo "$d"
 payload "$d" s1 p1 "fix the user's \"cart\" bug; don't touch prices" | hook prompt >/dev/null
-nid=$(python3 "$CS" open --repo "$d" --session s1 --summary "fix cart" | python3 -c 'import json,sys; print(json.load(sys.stdin)["need"])')
+nid=$(python3 "$CS" open --repo "$d" --session s1 --summary "fix cart" --criterion "cart ok" | python3 -c 'import json,sys; print(json.load(sys.stdin)["need"])')
 assert_eq "fix the user's \"cart\" bug; don't touch prices" "$(ledger "$d" "['needs']['$nid']['prompt']")" "15. open stores the captured prompt verbatim"
 
 # 16. a follow-up on a ready need re-opens it on its branch
@@ -211,7 +213,7 @@ assert_eq "origin/main" "$(ledger "$d" "['needs']['$nid']['base']")" "18. from t
 d="$ROOT/r19"; new_repo "$d"
 payload "$d" s1 p1 "what does the cart do? don't change anything" | hook prompt >/dev/null
 payload "$d" s1 p2 "<task-notification>done</task-notification>" | hook prompt >/dev/null
-nid=$(python3 "$CS" open --repo "$d" --session s1 --summary "x" | python3 -c 'import json,sys; print(json.load(sys.stdin)["need"])')
+nid=$(python3 "$CS" open --repo "$d" --session s1 --summary "x" --criterion y | python3 -c 'import json,sys; print(json.load(sys.stdin)["need"])')
 assert_eq "" "$(ledger "$d" "['needs']['$nid']['prompt']")" "19. an earlier prompt is never presented as this need's"
 
 # 20. three failing reviews block the need
@@ -219,5 +221,66 @@ d="$ROOT/r20"; new_repo "$d"; nid=$(open_need "$d")
 for i in 1 2 3; do echo "v$i" > "$d/w.txt"; gate=$(stop "$d" | reason | quoted); bash -c "$gate" >/dev/null 2>&1
   python3 "$REPO_ROOT/plugins/merge-review/skills/merge-review/scripts/review.py" record --repo "$d" --sha HEAD --score 10 >/dev/null; out=$(stop "$d" | reason); done
 assert_contains "used its 3 attempts" "$out" "20. the third failing review blocks the need"
+
+# 21. a need needs at least one criterion
+d="$ROOT/r21"; new_repo "$d"
+python3 "$CS" open --repo "$d" --session s1 --summary x >/dev/null 2>&1; assert_eq 1 "$?" "21. open without a criterion is refused"
+assert_eq "main" "$(git -C "$d" branch --show-current)" "21. and creates no branch"
+
+# 22. the contract comes first: each criterion's probe, red before the work, green at ready, in the report
+d="$ROOT/r22"; new_repo "$d"
+out=$(python3 "$CS" open --repo "$d" --session s1 --summary "add a greeting" --criterion "hello.txt says hello")
+nid=$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["need"])')
+assert_contains "--criterion c1" "$out" "22. open's reply names the probe to record first"
+assert_contains "record the probe" "$(stop "$d" | reason)" "22. the first Stop asks for the probe, not the work"
+python3 "$POF" record --repo "$d" --need "$nid" --criterion c1 --cmd "test -f hello.txt" >/dev/null
+out=$(stop "$d" | reason)
+assert_contains "Implement need $nid" "$out" "22. contract recorded → implement"
+assert_contains "c1: hello.txt says hello" "$out" "22. the implement step lists the criteria by id"
+echo hello > "$d/hello.txt"
+gate=$(stop "$d" | reason | quoted); bash -c "$gate" >/dev/null 2>&1
+check=$(stop "$d" | reason | quoted)
+assert_contains "check --need $nid" "$check" "22. proving runs the criterion's probe"
+bash -c "$check" >/dev/null 2>&1
+python3 "$REPO_ROOT/plugins/merge-review/skills/merge-review/scripts/review.py" record --repo "$d" --sha HEAD --score 95 >/dev/null
+watch=$(stop "$d" | reason | quoted); bash -c "$watch" >/dev/null 2>&1
+tx="$ROOT/projects/p/s1.jsonl"; mkdir -p "$ROOT/projects/p/s1/subagents"
+python3 - "$tx" "$ROOT/projects/p/s1/subagents/agent-a.jsonl" <<'PY'
+import json, sys
+from datetime import datetime, timezone
+ts = datetime.now(timezone.utc).isoformat()[:23] + "Z"
+def entry(mid, model, i, o, when=ts):
+    return json.dumps({"type": "assistant", "timestamp": when, "message": {"id": mid, "model": model,
+        "usage": {"input_tokens": i, "output_tokens": o, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}}})
+open(sys.argv[1], "w").write("\n".join([entry("m1", "m-main", 100, 10), entry("m1", "m-main", 100, 10),
+                                         entry("m0", "m-main", 9999, 9999, "2000-01-01T00:00:00.000Z")]) + "\n")
+open(sys.argv[2], "w").write(entry("a1", "m-sub", 50, 5) + "\n")
+PY
+out=$(payload "$d" s1 p1 "" "" "" "$tx" | hook stop | reason)
+assert_contains "Need ready" "$out" "22. the need reaches ready"
+assert_contains 'c1 (hello.txt says hello): `test -f hello.txt` red (exit 1)' "$out" "22. the report shows each criterion's red run"
+assert_contains "green at" "$out" "22. and its green run"
+assert_contains "m-main in 100 out 10" "$out" "22. tokens per model, each message once, none from before the need"
+assert_contains "m-sub in 50 out 5" "$out" "22. the subagents' tokens too"
+assert_contains "driven " "$out" "22. and the driven time"
+
+# 23. an amended criterion sends the need back to contracting
+d="$ROOT/r23"; new_repo "$d"; nid=$(open_need "$d")
+python3 "$CS" amend --repo "$d" --session s1 --criterion "greets in French" >/dev/null
+assert_contains "--criterion c2" "$(stop "$d" | reason)" "23. an amended criterion sends the need back to contracting"
+python3 "$CS" amend --repo "$d" --session s1 >/dev/null 2>&1; assert_eq 1 "$?" "23. an amendment without a criterion is refused"
+
+# 24. a need that falls off the history has its probes forgotten, through their owner
+d="$ROOT/r24"; new_repo "$d"
+python3 "$POF" waive --repo "$d" --need h1 --criterion c1 --reason old >/dev/null
+python3 - "$d" <<'PY'
+import json, sys
+hist = [{"id": f"h{i}", "branch": f"need/h{i}", "state": "ready"} for i in range(1, 21)]
+json.dump({"v": 1, "needs": {"n21": {"id": "n21", "branch": "need/n21", "state": "ready", "closed_prompt": "old"}},
+           "history": hist}, open(sys.argv[1] + "/.git/conductor.json", "w"))
+PY
+payload "$d" s1 p24 "hi" | hook prompt >/dev/null
+assert_eq "{}" "$(python3 "$POF" status --repo "$d" --need h1)" "24. the probes of a need gone from the history are forgotten"
+assert_eq "h2" "$(ledger "$d" "['history'][0]['id']")" "24. the history keeps the last 20"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]

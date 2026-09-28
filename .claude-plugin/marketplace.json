@@ -81,7 +81,7 @@
     },
     {
       "name": "delivery-conductor",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "source": "./plugins/delivery-conductor",
       "description": "Drives a stated need from the prompt to a ready PR/MR with no intervention: it opens the need on its own branch, then at every Stop sequences its siblings' stages (commit, gate, proven repros, fresh-eyes review, push and PR/MR, CI) through their read-only stage CLIs, runs the short script steps itself, and hands the model only the judgment steps. While it drives a branch, every sibling stands down (one voice). A halt, a no-progress stall or an exhausted budget blocks the need and holds its branch until the user resumes, abandons or releases it. Follows the AUTO scope; state in .git, never committed.",
       "category": "development",
