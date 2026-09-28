@@ -306,4 +306,62 @@ assert_eq 1 "$rc" "16. a probe file outside the repo is refused"
 python3 "$REPRO" record --repo "$d19" --need N7 --cmd false --file tests/x.sh >/dev/null 2>&1; rc=$?
 assert_eq 2 "$rc" "16. --file without --criterion is refused, never dropped"
 
+# --- 17. env-aware probes: the red run against a trusted local target, never production --------------
+free_port(){ python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
+port_free(){ python3 -c 'import socket,sys; s=socket.socket(); sys.exit(0 if s.connect_ex(("127.0.0.1", int(sys.argv[1]))) else 1)' "$1"; echo $?; }
+wait_port(){ for _ in $(seq 50); do [ "$(port_free "$1")" = 1 ] && return; sleep 0.1; done; }
+d20="$ROOT/t20"; mkrepo "$d20"; port=$(free_port)
+echo 'import os, urllib.request as u; u.urlopen(os.environ["HARNESS_BASE_URL"] + "/hello.txt")' > "$d20/probe.py"
+envrec(){ python3 "$REPRO" record --repo "$d20" --need N8 --criterion c1 --env-aware --read-only --file probe.py --cmd "python3 probe.py" 2>&1; }
+out=$(envrec); rc=$?
+assert_eq 1 "$rc" "17. an env-aware probe without a trusted serve target is refused"
+assert_contains "serve" "$out" "17. and the refusal names what is missing"
+printf '{"serve": {"cmd": "python3 -m http.server %s --bind 127.0.0.1", "base_url": "http://127.0.0.1:%s", "ready_path": "/", "timeout": 20}}' \
+  "$port" "$port" > "$d20/proof-of-fix.config.json"
+envrec >/dev/null; rc=$?
+assert_eq 1 "$rc" "17. a serve target in the cloneable tree is never trusted"
+mv "$d20/proof-of-fix.config.json" "$d20/.git/proof-of-fix.config.json"
+envrec >/dev/null; rc=$?
+assert_eq 0 "$rc" "17. recorded red against the local target (the page is not there yet)"
+assert_eq 0 "$(port_free "$port")" "17. the target is stopped after the red run"
+st=$(python3 "$REPRO" status --repo "$d20" --need N8)
+assert_contains '"env_aware": true' "$st" "17. the probe is marked env-aware"
+assert_contains '"read_only": true' "$st" "17. and read-only"
+echo hello > "$d20/hello.txt"
+python3 "$REPRO" check --repo "$d20" --need N8 >/dev/null 2>&1; rc=$?
+assert_eq 0 "$rc" "17. green against the local target once implemented"
+assert_eq 0 "$(port_free "$port")" "17. and the target is stopped again"
+cp "$d20/.git/proof-of-fix.config.json" "$ROOT/serve.json"
+printf '{"serve": {"cmd": "sleep 38.5", "base_url": "http://127.0.0.1:%s", "ready_path": "/", "timeout": 5}}' "$port" > "$d20/.git/proof-of-fix.config.json"
+( cd "$d20" && exec python3 -m http.server "$port" --bind 127.0.0.1 >/dev/null 2>&1 ) & squat=$!; wait_port "$port"
+python3 "$REPRO" check --repo "$d20" --need N8 >/dev/null 2>&1; rc=$?
+assert_eq 1 "$rc" "17. a port something else already answers on is refused, even serving the right page (old code)"
+kill "$squat"; wait "$squat" 2>/dev/null; cp "$ROOT/serve.json" "$d20/.git/proof-of-fix.config.json"
+printf '{"serve": {"cmd": "sleep 37.5", "base_url": "http://127.0.0.1:%s", "ready_path": "/", "timeout": 2}}' "$port" > "$d20/.git/proof-of-fix.config.json"
+out=$(python3 "$REPRO" check --repo "$d20" --need N8 2>&1); rc=$?
+assert_eq 1 "$rc" "17. a target that never answers fails the check"
+assert_contains "not ready" "$out" "17. and says so"
+assert_eq 0 "$(ps -Ao command | grep -c '^sleep 37.5')" "17. and is killed with its whole group"
+
+# --- 18. a check never resurrects a probe re-recorded while it ran; a session repro counts when bound --
+d21="$ROOT/t21"; mkrepo "$d21"
+python3 "$REPRO" record --repo "$d21" --need N9 --criterion c2 --cmd "test -f old.txt" >/dev/null 2>&1
+python3 "$REPRO" record --repo "$d21" --need N9 --criterion c1 \
+  --cmd "test -f go.txt && python3 '$REPRO' record --repo . --need N9 --criterion c2 --cmd 'test -f new.txt' >/dev/null" >/dev/null 2>&1
+touch "$d21/go.txt" "$d21/old.txt"
+python3 "$REPRO" check --repo "$d21" --need N9 >/dev/null 2>&1
+assert_contains "test -f new.txt" "$(python3 "$REPRO" status --repo "$d21" --need N9)" "18. the probe re-recorded during a check is kept"
+assert_eq "pending" "$(python3 "$REPRO" stage --repo "$d21" --need N9 --criteria c1,c2 | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')" \
+  "18. and it is never proven by the old probe's run"
+d22="$ROOT/t22"; mkrepo "$d22"
+python3 "$REPRO" record --repo "$d22" --need N10 --criterion c1 --cmd "test -f ok.txt" >/dev/null 2>&1; touch "$d22/ok.txt"
+CLAUDE_CODE_SESSION_ID=S python3 "$REPRO" record --repo "$d22" --need N10 --cmd "test -f fixed.txt" >/dev/null 2>&1
+CLAUDE_CODE_SESSION_ID=T python3 "$REPRO" record --repo "$d22" --cmd "test -f other.txt" >/dev/null 2>&1
+CLAUDE_CODE_SESSION_ID=S python3 "$REPRO" check --repo "$d22" --need N10 >/dev/null 2>&1; rc=$?
+assert_eq 1 "$rc" "18. the caller's repro bound to the need is checked with it"
+CLAUDE_CODE_SESSION_ID=T python3 "$REPRO" check --repo "$d22" --need N10 >/dev/null 2>&1; rc=$?
+assert_eq 0 "$rc" "18. a repro of another concern is not the need's"
+assert_eq "S" "$(python3 "$REPRO" stage --repo "$d22" --need N10 --criteria c1 --sessions S | python3 -c 'import json,sys; print(json.load(sys.stdin)["evidence"].get("session"))')" \
+  "18. a session repro's evidence names its session"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]

@@ -86,6 +86,19 @@ python3 "${SKILL}" waive  --repo . --need N --criterion c2 --reason '<why it is 
   record it again.
 - `check --need N` runs every probe of the need at one work state; `status --need N` prints its
   evidence; `forget --need N` drops it once the need is gone.
+- A probe of a web behaviour is **env-aware**: it reads `HARNESS_BASE_URL` (and `HARNESS_ENV`) instead of
+  a hard-coded host, and is recorded with `--env-aware` (plus `--read-only` when it only reads). Its red
+  run and its checks run against the repo's local target, never production, declared in trusted config,
+  `.git/proof-of-fix.config.json` (never the cloneable tree: it is a shell command):
+
+  ```json
+  {"serve": {"cmd": "npm run preview -- --port 4173", "base_url": "http://127.0.0.1:4173",
+             "ready_path": "/", "timeout": 60}}
+  ```
+
+  proof-of-fix refuses a port something else already answers on (it would serve old code), starts
+  `serve` in its own process group, waits for `ready_path`, runs the env-aware probes, and stops the
+  group. Without `serve`, an env-aware probe is refused.
 
 Then implement and end your turn: the conductor re-runs the probes as the need's proving stage.
 
