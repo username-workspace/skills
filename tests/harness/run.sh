@@ -501,6 +501,35 @@ for p in ship-when-done merge-review mr-watchdog proof-of-fix; do
     || ko "20. $p: the documented stage command runs [$line]"
 done
 
+# --- 16c. the E2E lane reads a conductor crash, systemMessage, garbage or stderr as a failure, never a silence
+stubc="$ROOT/stub-conductor.py"
+cat > "$stubc" <<'PY'
+import json, os, sys
+mode = os.environ["STUB_MODE"]
+if mode == "crash":
+    raise RuntimeError("conductor defect")
+if mode == "sysmsg":
+    print(json.dumps({"systemMessage": "[conductor] the ledger is corrupt"}))
+if mode == "garbage":
+    print("not json")
+if mode == "stderr":
+    print("{}"); print("a warning", file=sys.stderr)
+PY
+for mode in crash sysmsg garbage stderr silent; do
+  got=$(STUB_MODE=$mode python3 - "$dL/tests/e2e" "$stubc" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1]); import e2e
+e2e.CONDUCTOR = sys.argv[2]
+try:
+    print("reason:" + e2e.conductor_stop("/nonexistent", "s"))
+except e2e.Failure:
+    print("failure")
+PY
+)
+  want=$([ "$mode" = silent ] && echo "reason:" || echo "failure")
+  assert_eq "$want" "$got" "16c. the conductor answering $mode reads as $want"
+done
+
 # --- 17b. a bare repository shipped inside a clone is never a source of trusted config -------------
 dE="$ROOT/embedded"; new_repo "$dE"; git init -q --bare "$dE/vendor/evil"
 printf '{"gate":"touch %s"}' "$ROOT/pwned" > "$dE/vendor/evil/ship-when-done.json"

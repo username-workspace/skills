@@ -332,4 +332,17 @@ PY
 )
 assert_eq "{'m': [111, 0, 0, 0]}" "$tok" "27. tokens inside the driven windows only, a copied message once, workflow agents included, no synthetic line"
 
+# 28. a test-first probe file committed alone is not the work: the first red proving asks to implement
+d="$ROOT/r28"; new_repo "$d"
+nid=$(python3 "$CS" open --repo "$d" --session s1 --summary "add a greeting" --criterion "hello.txt says hello" | python3 -c 'import json,sys; print(json.load(sys.stdin)["need"])')
+mkdir -p "$d/tests"; echo 'test -f hello.txt' > "$d/tests/hello.sh"
+python3 "$POF" record --repo "$d" --need "$nid" --criterion c1 --file tests/hello.sh --cmd "bash tests/hello.sh" >/dev/null
+gate=$(stop "$d" | reason | quoted); bash -c "$gate" >/dev/null 2>&1
+check=$(stop "$d" | reason | quoted); bash -c "$check" >/dev/null 2>&1
+out=$(stop "$d" | reason)
+assert_contains "Implement need $nid" "$out" "28. the probe's own file committed alone → the need is asked for its work"
+assert_contains "c1: hello.txt says hello" "$out" "28. with its criteria"
+check=$(stop "$d" | reason | quoted); bash -c "$check" >/dev/null 2>&1
+assert_contains "still fails" "$(stop "$d" | reason)" "28. once asked, a red probe is a fix step"
+
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]

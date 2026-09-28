@@ -13,7 +13,7 @@ failure files a GitHub issue on the skills repo carrying the full evidence, read
 Usage: python3 tests/e2e/e2e.py [--forge github|gitlab] [--seed N] [--count N] [--repo owner/name]
                                [--scenario flow:gate:ci | twist:<name> | need:<name>]
 """
-import argparse, json, os, random, re, shutil, subprocess, sys, tempfile, time
+import argparse, json, os, random, re, shlex, shutil, socket, subprocess, sys, tempfile, time
 from urllib.parse import quote
 
 os.environ.setdefault("HARNESS_AUTO_ENGAGE", "1")   # the generated scenarios replay the AUTO lanes
@@ -607,24 +607,37 @@ def remote_head(workdir, branch):
     return out.split()[0] if out else ""
 
 
-def open_need(tag, name):
+def pof(what, *argv):
+    rc, out, err = sh([sys.executable, POF, *argv])
+    expect(rc == 0, what, out + err)
+    return out
+
+
+def open_need(tag, name, extra=(), record=True):
+    """A need on a fresh clone, its first criterion `<name>.txt exists`; with `record`, that criterion's
+    probe is recorded, failing, as the contract asks before any edit."""
     workdir = os.path.join(tempfile.mkdtemp(prefix="harness-e2e-"), "repo")
     clone(workdir)
     json.dump({"gate": "true"}, open(os.path.join(workdir, ".git", "ship-when-done.json"), "w"))
     session = f"e2e-{tag}"
+    more = [a for text in extra for a in ("--criterion", text)]
     need = conductor_cli("the conductor opens the need", "open", "--repo", workdir, "--session", session,
                          "--summary", f"e2e need {name}", "--type", "feat", "--criterion", f"{name}.txt exists",
-                         "--prompt", f"E2E need {name} ({tag})")
-    rc, out, err = sh([sys.executable, POF, "record", "--repo", workdir, "--need", need["need"], "--criterion", "c1",
-                       "--cmd", f"test -f {name}.txt"])
-    expect(rc == 0, "the criterion's probe is recorded, failing, before the work", out + err)
+                         *more, "--prompt", f"E2E need {name} ({tag})")
+    if record:
+        pof("the criterion's probe is recorded, failing, before the work", "record", "--repo", workdir, "--need",
+            need["need"], "--criterion", "c1", "--cmd", f"test -f {name}.txt")
     return workdir, session, need["branch"]
 
 
-def drive(workdir, session, name, implement=True, turns=20):
+def drive(workdir, session, name, implement=True, turns=20, probes=None, fix=None):
     """Do what each conductor instruction names, as the model would, until the need is ready. The need is
-    implemented once, and only when `implement`; anything else the conductor says (a blocked need, a
-    second request to implement, a silent Stop) fails with its full text."""
+    implemented once, and only when `implement`; the contract's probes come from `probes` (criterion id to
+    command) and a red criterion is fixed by `fix(criterion)`; anything else the conductor says (a
+    blocked need, a second request to implement, a silent Stop) fails with its full text and the output
+    of the last background step (a red gate, CI or probe comes back as an instruction)."""
+    need = sh(["git", "-C", workdir, "branch", "--show-current"], check=True)[1].split("/", 1)[-1]
+    last = ""
     for _ in range(turns):
         why = conductor_stop(workdir, session)
         cmd = re.search(r"`([^`]+)`", why)
@@ -634,15 +647,24 @@ def drive(workdir, session, name, implement=True, turns=20):
             implement = False
             work(workdir, name, "green")
             open(os.path.join(workdir, ".mr-watchdog.json"), "w").write('{"poll_interval": 1}')
+        elif why.startswith("[conductor] Before any edit, record the probe") and probes:
+            for cid in re.findall(r"--criterion (\S+) --cmd", why):
+                expect(cid in probes, f"the contract asks for a probe the scenario knows ({cid})", why)
+                pof(f"criterion {cid}'s probe is recorded, failing", "record", "--repo", workdir, "--need", need,
+                    "--criterion", cid, "--cmd", probes[cid])
+        elif why.startswith("[conductor] The probe of criterion") and fix:
+            fix(re.match(r"\[conductor\] The probe of criterion (\S+) ", why).group(1))
+        elif why.startswith("[conductor] The need advanced through its script steps and ran out of hook time"):
+            continue
         elif why.startswith("[conductor] Launch this with run_in_background") and cmd:
             rc, out, err = sh(cmd.group(1), timeout=900)
-            expect(rc == 0, f"the background step `{cmd.group(1)}` succeeds", out + err)
+            last = f"\n--- last background step `{cmd.group(1)}`, exit {rc} ---\n{(out + err)[-1500:]}"
         elif why.startswith("[conductor] Review HEAD") and cmd:
             record = cmd.group(1).replace("<N>", "95").replace("'<JSON list of the findings still open>'", "'[]'")
             rc, out, err = sh(record)
             expect(rc == 0, "the review command the conductor names records the verdict", out + err)
         else:
-            raise Failure(f"unexpected conductor instruction:\n{why[-2000:] or '(a silent Stop)'}")
+            raise Failure(f"unexpected conductor instruction:\n{why[-2000:] or '(a silent Stop)'}{last}")
     raise Failure(f"the need never reached ready in {turns} Stops")
 
 
@@ -699,7 +721,70 @@ def need_follow_up(tag):
     finish(branch)
 
 
-NEEDS = {"ready": need_ready, "halt-resume": need_halt_resume, "follow-up": need_follow_up}
+def need_acceptance(tag):
+    workdir, session, branch = open_need(tag, "accept", extra=["the change is documented"], record=False)
+    need = branch.split("/", 1)[1]
+    os.makedirs(os.path.join(workdir, "probes"), exist_ok=True)
+    open(os.path.join(workdir, "probes", "accept.sh"), "w").write("test -f accept.txt\n")
+    pof("the criterion's probe is recorded failing, its file pinned", "record", "--repo", workdir, "--need", need,
+        "--criterion", "c1", "--file", "probes/accept.sh", "--cmd", "bash probes/accept.sh")
+    pof("a criterion that is not behavioural is waived", "waive", "--repo", workdir, "--need", need,
+        "--criterion", "c2", "--reason", "documentation, reviewed with the diff")
+    report = drive(workdir, session, "accept")
+    head = remote_head(workdir, branch)
+    c1 = next((line for line in report.splitlines() if line.startswith("c1 ")), "")
+    expect(c1.startswith("c1 (accept.txt exists): `bash probes/accept.sh` red (exit 1)")
+           and f"green at {head[:12]}" in c1 and "(probes/accept.sh)" in c1,
+           "the report proves c1 red, then green at the shipped head, its file pinned", f"remote {head}\n{report}")
+    expect("c2 (the change is documented): waived: documentation, reviewed with the diff" in report,
+           "the report shows c2's waiver", report)
+    finish(branch)
+
+
+def free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def need_env_probe(tag):
+    workdir, session, branch = open_need(tag, "envprobe", record=False)
+    need, port = branch.split("/", 1)[1], free_port()
+    json.dump({"serve": {"cmd": f"{shlex.quote(sys.executable)} -m http.server {port} --bind 127.0.0.1",
+                         "base_url": f"http://127.0.0.1:{port}", "ready_path": "/", "timeout": 30}},
+              open(os.path.join(workdir, ".git", "proof-of-fix.config.json"), "w"))
+    open(os.path.join(workdir, "probe_env.py"), "w").write(
+        'import os, urllib.request as u; u.urlopen(os.environ["HARNESS_BASE_URL"] + "/envprobe.txt")\n')
+    pof("an env-aware probe is recorded red against the local target", "record", "--repo", workdir, "--need", need,
+        "--criterion", "c1", "--env-aware", "--read-only", "--file", "probe_env.py", "--cmd",
+        f"{shlex.quote(sys.executable)} probe_env.py")
+    report = drive(workdir, session, "envprobe")
+    expect("c1 (envprobe.txt exists)" in report and "red (exit 1)" in report and "green at" in report,
+           "the env-aware criterion is red, then green against the local target", report)
+    status = json.loads(pof("proof-of-fix reports the need", "status", "--repo", workdir, "--need", need))
+    checked = status["c1"]["checked"]
+    expect(checked.get("env") == "local", "its green run was against the local target, never production",
+           json.dumps(checked))
+    finish(branch)
+
+
+def need_amend(tag):
+    workdir, session, branch = open_need(tag, "amend")
+    expect(conductor_stop(workdir, session).startswith("[conductor] Implement need"),
+           "a need with its contract asks for the work")
+    work(workdir, "amend", "green")
+    open(os.path.join(workdir, ".mr-watchdog.json"), "w").write('{"poll_interval": 1}')
+    conductor_cli("an amendment adds a criterion", "amend", "--repo", workdir, "--session", session,
+                  "--criterion", "amend-2.txt exists")
+    report = drive(workdir, session, "amend", implement=False, probes={"c2": "test -f amend-2.txt"},
+                   fix=lambda cid: work(workdir, "amend-2", "green"))
+    expect("c2 (amend-2.txt exists): `test -f amend-2.txt` red (exit 1)" in report
+           and report.count("green at") >= 2, "the amended criterion was contracted red, then proven green", report)
+    finish(branch)
+
+
+NEEDS = {"ready": need_ready, "halt-resume": need_halt_resume, "follow-up": need_follow_up,
+         "acceptance": need_acceptance, "env-probe": need_env_probe, "amend": need_amend}
 
 
 # --- the watcher: generate, run, classify, self-heal, hand off ---------------------------------------
