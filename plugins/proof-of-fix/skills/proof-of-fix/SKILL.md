@@ -69,19 +69,40 @@ while the probe ran; only such a check counts as proof for a need.
 
 ## When driven
 
-While a delivery-conductor need drives the branch, the nudge and the Stop re-run stand down: record the
-repro as usual (before the fix), fix the root cause, and end your turn. The conductor re-runs the probe
-as the need's proving stage.
+While a delivery-conductor need drives the branch, the nudge and the Stop re-run stand down. Each
+criterion of the need's contract gets its probe before any edit, keyed by need and criterion (not by
+session), so the evidence follows the need across sessions:
+
+```bash
+python3 "${SKILL}" record --repo . --need N --criterion c1 --cmd '<probe>' --file tests/c1.test.ts   # must fail now
+python3 "${SKILL}" record --repo . --need N --criterion c1 --cmd '<probe>' --red-waived '<why it cannot fail>'
+python3 "${SKILL}" waive  --repo . --need N --criterion c2 --reason '<why it is not behavioural>'
+```
+
+- The red run is bound to the work state it failed at, dirty or not (a new test file is usually
+  uncommitted).
+- Every repo file the probe runs is declared with `--file`: a missing one is refused (red would only
+  mean "missing"), and each is pinned by content. A probe edited after its red run no longer counts:
+  record it again.
+- `check --need N` runs every probe of the need at one work state; `status --need N` prints its
+  evidence; `forget --need N` drops it once the need is gone.
+
+Then implement and end your turn: the conductor re-runs the probes as the need's proving stage.
 
 ## Stage protocol (delivery-conductor)
 
-`scripts/repro.py stage --repo R --need N --sessions S1,S2` answers, read-only, where a need stands in its `proving` stage (the repros the need's sessions recorded):
-a v1 report with the stage's `state` (`done`, `pending`, `blocked`), its `evidence` (bound to the exact
-work state or sha it was produced on) and the `next` step (`script`, `background` or `skill`). A repo that
-opted this plugin out gets `{"enabled": false}` from it. See `docs/architecture.md` in the marketplace.
+`scripts/repro.py stage --repo R --need N --stage proving --criteria c1,c2` answers, read-only, where a
+need stands: `--stage proving` is done when every probe passes at the current work state, `--stage
+contracting` when every criterion has a probe or a waiver. Needs of the session-keyed era still pass
+`--sessions S1,S2` for their repros. Without criteria (or sessions) the stage is refused, never a
+silent done. The report is v1: the stage's `state` (`done`, `pending`, `blocked`), its `evidence`
+(bound to the exact work state or sha it was produced on) and the `next` step (`script`, `background`
+or `skill`). A repo that opted this plugin out gets `{"enabled": false}` from it. See
+`docs/architecture.md` in the marketplace.
 
-Every command acts on the calling session (`CLAUDE_CODE_SESSION_ID`, set in Claude Code's shell). From a
-plain terminal pass `--session <id>`; `status` and `clear` name the sessions holding an open repro.
+A session repro belongs to the calling session (`CLAUDE_CODE_SESSION_ID`, set in Claude Code's shell).
+From a plain terminal pass `--session <id>`; `status` and `clear` name the sessions holding an open
+repro. The commands given `--need` and `--criterion` act on the need, whichever session runs them.
 
 ## Composes with the delivery harness
 
