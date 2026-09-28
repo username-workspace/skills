@@ -352,9 +352,9 @@ Run the E2E lane deliberately: before a release or after a harness change.
 
 - **Fail-closed engagement.** Every uncertain input (missing baseline, corrupt state, unknown mode
   value) resolves to *not engaged*. The harness under-acts rather than acts wrongly.
-- **No shell from cloneable files.** Shell-command config fields (`gate`, `judge_command`, …) and the
-  gate-strictness knobs are honoured **only** from `.git/` (never cloned) or an explicit `--config` —
-  never from the working-tree `.<plugin>.json` that arrives with any clone.
+- **No shell from cloneable files.** Shell-command config fields (`gate`, `judge_command`, proof-of-fix's
+  `serve.cmd`, …) and the gate-strictness knobs are honoured **only** from `.git/` (never cloned) or an
+  explicit `--config` — never from the working-tree `.<plugin>.json` that arrives with any clone.
 - **No implicit bare repository.** Every git call the kernel makes carries `-c safe.bareRepository=explicit`
   (git 2.38+), so a directory shaped like a bare repository inside a clone is never opened as a git dir:
   its HEAD, its git config and any `.git/`-style state in it are never read. `commit`, `push` and

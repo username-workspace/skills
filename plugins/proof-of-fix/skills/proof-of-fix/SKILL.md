@@ -92,13 +92,16 @@ python3 "${SKILL}" waive  --repo . --need N --criterion c2 --reason '<why it is 
   `.git/proof-of-fix.config.json` (never the cloneable tree: it is a shell command):
 
   ```json
-  {"serve": {"cmd": "npm run preview -- --port 4173", "base_url": "http://127.0.0.1:4173",
+  {"serve": {"cmd": "npm run preview -- --host 127.0.0.1 --port $PORT --strictPort",
              "ready_path": "/", "timeout": 60}}
   ```
 
-  proof-of-fix refuses a port something else already answers on (it would serve old code), starts
-  `serve` in its own process group, waits for `ready_path`, runs the env-aware probes, and stops the
-  group. Without `serve`, an env-aware probe is refused.
+  proof-of-fix picks a free port for `$PORT` (so two checks never share one, and `HARNESS_BASE_URL` is
+  `http://127.0.0.1:$PORT`), starts `serve` in its own process group, waits for `ready_path` (any HTTP
+  answer, the process still alive), runs the env-aware probes, and stops the whole group, a TERM or HUP
+  to the check included. A fixed `base_url` instead of `$PORT` must be on loopback, and a port something
+  else already answers on is refused (it would serve old code). A target that cannot serve is reported
+  as such, not as a red probe. Without `serve`, an env-aware probe is refused.
 
 Then implement and end your turn: the conductor re-runs the probes as the need's proving stage.
 

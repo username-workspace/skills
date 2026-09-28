@@ -310,38 +310,73 @@ assert_eq 2 "$rc" "16. --file without --criterion is refused, never dropped"
 free_port(){ python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
 port_free(){ python3 -c 'import socket,sys; s=socket.socket(); sys.exit(0 if s.connect_ex(("127.0.0.1", int(sys.argv[1]))) else 1)' "$1"; echo $?; }
 wait_port(){ for _ in $(seq 50); do [ "$(port_free "$1")" = 1 ] && return; sleep 0.1; done; }
-d20="$ROOT/t20"; mkrepo "$d20"; port=$(free_port)
+serve_cfg(){ printf '{"serve": %s}' "$2" > "$1/.git/proof-of-fix.config.json"; }
+d20="$ROOT/t20"; mkrepo "$d20"
 echo 'import os, urllib.request as u; u.urlopen(os.environ["HARNESS_BASE_URL"] + "/hello.txt")' > "$d20/probe.py"
-envrec(){ python3 "$REPRO" record --repo "$d20" --need N8 --criterion c1 --env-aware --read-only --file probe.py --cmd "python3 probe.py" 2>&1; }
+envrec(){ python3 "$REPRO" record --repo "$d20" --need "${1:-N8}" --criterion c1 --env-aware --read-only --file probe.py --cmd "${2:-python3 probe.py}" 2>&1; }
 out=$(envrec); rc=$?
 assert_eq 1 "$rc" "17. an env-aware probe without a trusted serve target is refused"
 assert_contains "serve" "$out" "17. and the refusal names what is missing"
-printf '{"serve": {"cmd": "python3 -m http.server %s --bind 127.0.0.1", "base_url": "http://127.0.0.1:%s", "ready_path": "/", "timeout": 20}}' \
-  "$port" "$port" > "$d20/proof-of-fix.config.json"
+printf '{"serve": {"cmd": "python3 -m http.server $PORT --bind 127.0.0.1"}}' > "$d20/proof-of-fix.config.json"
 envrec >/dev/null; rc=$?
 assert_eq 1 "$rc" "17. a serve target in the cloneable tree is never trusted"
 mv "$d20/proof-of-fix.config.json" "$d20/.git/proof-of-fix.config.json"
+serve_cfg "$d20" '{"cmd": "python3 -m http.server 8080", "base_url": "http://example.com:8080"}'
+out=$(envrec); rc=$?
+assert_eq 1 "$rc" "17. a target off loopback is refused (a red run never touches another host)"
+assert_contains "loopback" "$out" "17. and says why"
+serve_cfg "$d20" '{"cmd": "python3 -m http.server $PORT --bind 127.0.0.1", "ready_path": "/definitely-missing", "timeout": 20}'
 envrec >/dev/null; rc=$?
-assert_eq 0 "$rc" "17. recorded red against the local target (the page is not there yet)"
-assert_eq 0 "$(port_free "$port")" "17. the target is stopped after the red run"
+assert_eq 0 "$rc" "17. recorded red against a target on a port proof-of-fix picked (an HTTP error still answers)"
+assert_contains "404" "$(python3 "$REPRO" status --repo "$d20" --need N8)" "17. red because the page is missing, not because the probe had no target"
 st=$(python3 "$REPRO" status --repo "$d20" --need N8)
 assert_contains '"env_aware": true' "$st" "17. the probe is marked env-aware"
 assert_contains '"read_only": true' "$st" "17. and read-only"
+assert_eq 0 "$(ps -Ao command | grep -c '^python3 -m http.server [0-9]* --bind 127.0.0.1')" "17. the target is stopped after the red run"
+echo '# edited after its red run' >> "$d20/probe.py"
+python3 "$REPRO" check --repo "$d20" --need N8 >/dev/null 2>&1
+again=$(python3 "$REPRO" stage --repo "$d20" --need N8 --criteria c1 | python3 -c 'import json,re,sys; print(re.search(r"`([^`]+)`", json.load(sys.stdin)["next"]["instruction"]).group(1))')
+bash -c "$again" >/dev/null 2>&1; rc=$?
+assert_eq 0 "$rc" "17. the re-record command of an edited env-aware probe runs as written"
+assert_contains '"env_aware": true' "$(python3 "$REPRO" status --repo "$d20" --need N8)" "17. and keeps the probe env-aware and read-only"
 echo hello > "$d20/hello.txt"
 python3 "$REPRO" check --repo "$d20" --need N8 >/dev/null 2>&1; rc=$?
 assert_eq 0 "$rc" "17. green against the local target once implemented"
-assert_eq 0 "$(port_free "$port")" "17. and the target is stopped again"
-cp "$d20/.git/proof-of-fix.config.json" "$ROOT/serve.json"
-printf '{"serve": {"cmd": "sleep 38.5", "base_url": "http://127.0.0.1:%s", "ready_path": "/", "timeout": 5}}' "$port" > "$d20/.git/proof-of-fix.config.json"
+port=$(free_port); cp "$d20/.git/proof-of-fix.config.json" "$ROOT/serve.json"
+serve_cfg "$d20" "{\"cmd\": \"sleep 38.5\", \"base_url\": \"http://127.0.0.1:$port\", \"timeout\": 5}"
 ( cd "$d20" && exec python3 -m http.server "$port" --bind 127.0.0.1 >/dev/null 2>&1 ) & squat=$!; wait_port "$port"
 python3 "$REPRO" check --repo "$d20" --need N8 >/dev/null 2>&1; rc=$?
 assert_eq 1 "$rc" "17. a port something else already answers on is refused, even serving the right page (old code)"
-kill "$squat"; wait "$squat" 2>/dev/null; cp "$ROOT/serve.json" "$d20/.git/proof-of-fix.config.json"
-printf '{"serve": {"cmd": "sleep 37.5", "base_url": "http://127.0.0.1:%s", "ready_path": "/", "timeout": 2}}' "$port" > "$d20/.git/proof-of-fix.config.json"
+envrec N12 >/dev/null; rc=$?
+assert_eq 1 "$rc" "17. record refuses it too"
+kill "$squat"; wait "$squat" 2>/dev/null
+serve_cfg "$d20" "{\"cmd\": \"sleep 37.5\", \"base_url\": \"http://127.0.0.1:$port\", \"timeout\": 2}"
 out=$(python3 "$REPRO" check --repo "$d20" --need N8 2>&1); rc=$?
 assert_eq 1 "$rc" "17. a target that never answers fails the check"
 assert_contains "not ready" "$out" "17. and says so"
-assert_eq 0 "$(ps -Ao command | grep -c '^sleep 37.5')" "17. and is killed with its whole group"
+assert_contains "local target" "$(python3 "$REPRO" stage --repo "$d20" --need N8 --criteria c1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["next"]["instruction"])')" \
+  "17. proving asks to fix the target, not the code"
+assert_eq 0 "$(ps -Ao command | grep -c '^sleep 37.5')" "17. and the target is stopped"
+cat > "$ROOT/stubborn.py" <<'PY'
+import http.server, signal, subprocess, sys
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), http.server.SimpleHTTPRequestHandler).serve_forever()
+PY
+serve_cfg "$d20" "{\"cmd\": \"python3 $ROOT/stubborn.py \$PORT; true\", \"timeout\": 20}"
+python3 "$REPRO" check --repo "$d20" --need N8 >/dev/null 2>&1; rc=$?
+assert_eq 0 "$rc" "17. a target whose child ignores SIGTERM still serves the check"
+assert_eq 0 "$(ps -Ao command | grep -c "[s]tubborn.py")" "17. and its whole group is stopped, the stubborn child too"
+serve_cfg "$d20" "{\"cmd\": \"python3 -c 'import subprocess, sys; open(\\\"$ROOT/orphan.pid\\\", \\\"w\\\").write(str(subprocess.Popen([sys.executable, \\\"-m\\\", \\\"http.server\\\", \\\"$port\\\", \\\"--bind\\\", \\\"127.0.0.1\\\"], cwd=\\\"$d20\\\", start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).pid))'\", \"base_url\": \"http://127.0.0.1:$port\", \"timeout\": 10}"
+out=$(python3 "$REPRO" check --repo "$d20" --need N8 2>&1); rc=$?
+assert_eq 1 "$rc" "17. a target that exits while something it left behind answers is not ready"
+[ -f "$ROOT/orphan.pid" ] && kill "$(cat "$ROOT/orphan.pid")" 2>/dev/null
+serve_cfg "$d20" "{\"cmd\": \"python3 -m http.server $port --bind 127.0.0.1\", \"base_url\": \"http://127.0.0.1:$port\", \"timeout\": 20}"
+touch "$d20/slow"
+python3 "$REPRO" record --repo "$d20" --need N13 --criterion c1 --env-aware --cmd "test -f slow && sleep 20.25; python3 probe.py; test -f never" >/dev/null 2>&1
+python3 "$REPRO" check --repo "$d20" --need N13 >/dev/null 2>&1 & chk=$!; wait_port "$port"
+kill -TERM "$chk"; wait "$chk" 2>/dev/null
+sleep 1
+assert_eq 0 "$(port_free "$port")" "17. a check stopped by SIGTERM still stops its target"
 
 # --- 18. a check never resurrects a probe re-recorded while it ran; a session repro counts when bound --
 d21="$ROOT/t21"; mkrepo "$d21"
