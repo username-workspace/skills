@@ -7,13 +7,13 @@ reproducible) on a disposable sandbox repo with plan-steered CI — real pushes,
 real registration windows.
 
 Watcher duties: every scenario failure is re-run once with the same seed (flake vs defect); the sandbox
-is self-healed before each run (stale e2e/* branches and PRs are garbage-collected); a persistent
+is self-healed before each run (stale e2e/* and need/* branches and PRs are garbage-collected); a persistent
 failure files a GitHub issue on the skills repo carrying the full evidence, ready for a fixing session.
 
 Usage: python3 tests/e2e/e2e.py [--forge github|gitlab] [--seed N] [--count N] [--repo owner/name]
-                               [--scenario flow:gate:ci]
+                               [--scenario flow:gate:ci | twist:<name> | need:<name>]
 """
-import argparse, json, os, random, shutil, subprocess, sys, tempfile, time
+import argparse, json, os, random, re, shutil, subprocess, sys, tempfile, time
 from urllib.parse import quote
 
 os.environ.setdefault("HARNESS_AUTO_ENGAGE", "1")   # the generated scenarios replay the AUTO lanes
@@ -24,7 +24,9 @@ REVIEW = os.path.join(SKILLS, "plugins/merge-review/skills/merge-review/scripts/
 WATCH = os.path.join(SKILLS, "plugins/mr-watchdog/skills/mr-watchdog/scripts/watch.py")
 SHIP_HOOK = os.path.join(SKILLS, "plugins/ship-when-done/hooks/stop-hook.py")
 SHIP_PLUGIN = os.path.join(SKILLS, "plugins/ship-when-done")
-HARNESS = ("plugins/ship-when-done", "plugins/merge-review", "plugins/mr-watchdog", "lib")
+CONDUCTOR = os.path.join(SKILLS, "plugins/delivery-conductor/skills/delivery-conductor/scripts/conductor.py")
+HARNESS = ("plugins/ship-when-done", "plugins/merge-review", "plugins/mr-watchdog", "plugins/proof-of-fix",
+           "plugins/delivery-conductor", "lib")
 E2E_REPO = "username-workspace/harness-e2e"      # same path on github.com and gitlab.com
 FORGE = "github"
 ISSUE_REPO = "username-workspace/skills"
@@ -145,10 +147,10 @@ def branches():
 
 def gc_sandbox():
     for pr in open_prs():
-        if pr["branch"].startswith("e2e/"):
+        if pr["branch"].startswith(("e2e/", "need/")):
             pr_close(pr)
     for b in branches():
-        if b.startswith("e2e/"):
+        if b.startswith(("e2e/", "need/")):
             branch_delete(b)
 
 
@@ -229,7 +231,9 @@ def coverage_record(label, runid, secs):
 
 
 def scenario_label(sc):
-    if sc.get("twist"):
+    if sc.get("need"):
+        label = f"need/{sc['need']}"
+    elif sc.get("twist"):
         label = f"twist/{sc['twist']}"
     else:
         base = f"{sc.get('project', 'bare')}/{sc['flow']}/{sc['gate']}/{sc['ci']}"
@@ -246,6 +250,7 @@ def ledger_spaces():
                       "ci": "red-then-fixed" if p == "multi" else "green", "project": p}
                      for p in PROJECTS],
         "twists": [{"twist": t} for t in TWISTS],
+        "needs": [{"need": n} for n in NEEDS],
         "explicit": list(EXPLICIT_SET),
     }
 
@@ -289,6 +294,9 @@ def pr_state(branch):
 # --- the scenario executor ---------------------------------------------------------------------------
 
 def run_scenario(sc, tag):
+    if sc.get("need"):
+        NEEDS[sc["need"]](tag)
+        return "pass"
     if sc.get("twist"):
         TWISTS[sc["twist"]](tag)
         return "pass"
@@ -558,6 +566,138 @@ TWISTS = {
 }
 
 
+# --- needs: delivery-conductor drives a stated need to a ready PR/MR; this driver plays the model -----
+
+def conductor_hook(event, payload):
+    """The conductor's hook as Claude Code runs it; an error, a traceback or unparseable output fails the
+    scenario with the hook's full output, never reads as a silent hook."""
+    p = subprocess.run([sys.executable, CONDUCTOR, "hook", "--event", event], input=json.dumps(payload),
+                       capture_output=True, text=True, timeout=300)
+    out = p.stdout.strip()
+    try:
+        reply = json.loads(out) if out else {}
+    except ValueError:
+        reply = None
+    expect(p.returncode == 0 and not p.stderr.strip() and isinstance(reply, dict) and "systemMessage" not in reply,
+           f"the conductor's {event} hook answers cleanly",
+           f"rc={p.returncode}\nstdout:\n{out[-2000:]}\nstderr:\n{p.stderr[-2000:]}")
+    return reply
+
+
+def conductor_stop(repo, session):
+    return conductor_hook("stop", {"cwd": repo, "session_id": session, "prompt_id": "e2e", "transcript_path": "",
+                                   "stop_hook_active": False, "background_tasks": []}).get("reason", "")
+
+
+def conductor_prompt(repo, session, prompt_id, prompt):
+    reply = conductor_hook("prompt", {"cwd": repo, "session_id": session, "prompt_id": prompt_id,
+                                      "prompt": prompt, "transcript_path": ""})
+    return (reply.get("hookSpecificOutput") or {}).get("additionalContext", "")
+
+
+def conductor_cli(what, *argv):
+    rc, out, err = sh([sys.executable, CONDUCTOR, *argv])
+    expect(rc == 0, what, out + err)
+    return json.loads(out)
+
+
+def remote_head(workdir, branch):
+    _, out, _ = sh(["git", "-C", workdir, "ls-remote", "origin", f"refs/heads/{branch}"], check=True)
+    return out.split()[0] if out else ""
+
+
+def open_need(tag, name):
+    workdir = os.path.join(tempfile.mkdtemp(prefix="harness-e2e-"), "repo")
+    clone(workdir)
+    json.dump({"gate": "true"}, open(os.path.join(workdir, ".git", "ship-when-done.json"), "w"))
+    session = f"e2e-{tag}"
+    need = conductor_cli("the conductor opens the need", "open", "--repo", workdir, "--session", session,
+                         "--summary", f"e2e need {name}", "--type", "feat", "--criterion", f"{name}.txt exists",
+                         "--prompt", f"E2E need {name} ({tag})")
+    return workdir, session, need["branch"]
+
+
+def drive(workdir, session, name, implement=True, turns=20):
+    """Do what each conductor instruction names, as the model would, until the need is ready. The need is
+    implemented once, and only when `implement`; anything else the conductor says (a blocked need, a
+    second request to implement, a silent Stop) fails with its full text."""
+    for _ in range(turns):
+        why = conductor_stop(workdir, session)
+        cmd = re.search(r"`([^`]+)`", why)
+        if why.startswith("[conductor] Need ready"):
+            return why
+        if why.startswith("[conductor] Implement need") and implement:
+            implement = False
+            work(workdir, name, "green")
+            open(os.path.join(workdir, ".mr-watchdog.json"), "w").write('{"poll_interval": 1}')
+        elif why.startswith("[conductor] Launch this with run_in_background") and cmd:
+            rc, out, err = sh(cmd.group(1), timeout=900)
+            expect(rc == 0, f"the background step `{cmd.group(1)}` succeeds", out + err)
+        elif why.startswith("[conductor] Review HEAD") and cmd:
+            record = cmd.group(1).replace("<N>", "95").replace("'<JSON list of the findings still open>'", "'[]'")
+            rc, out, err = sh(record)
+            expect(rc == 0, "the review command the conductor names records the verdict", out + err)
+        else:
+            raise Failure(f"unexpected conductor instruction:\n{why[-2000:] or '(a silent Stop)'}")
+    raise Failure(f"the need never reached ready in {turns} Stops")
+
+
+def finish(branch):
+    pr = pr_state(branch)
+    expect(pr and not pr["isDraft"], "a ready need leaves a PR/MR marked ready for review", json.dumps(pr))
+    pr_close(pr, branch)
+
+
+def need_ready(tag):
+    workdir, session, branch = open_need(tag, "ready")
+    report = drive(workdir, session, "ready")
+    ci = next((line for line in report.splitlines() if line.startswith("ci: ")), "")
+    head = remote_head(workdir, branch)
+    expect(head and f'"sha": "{head}"' in ci and '"verdict": "green"' in ci,
+           "the ready report carries a green CI verdict at the pushed head", f"remote {head}\n{report}")
+    finish(branch)
+
+
+def need_halt_resume(tag):
+    workdir, session, branch = open_need(tag, "halt")
+    expect(conductor_stop(workdir, session).startswith("[conductor] Implement need"),
+           "a fresh need asks for its implementation")
+    work(workdir, "halt", "green")
+    halted = conductor_cli("halt blocks the need", "halt", "--repo", workdir, "--session", session)
+    expect(halted.get("work_committed") is True, "halt commits the need's work on its held branch", json.dumps(halted))
+    _, head, _ = sh(["git", "-C", workdir, "rev-parse", "HEAD"], check=True)
+    expect(conductor_stop(workdir, session) == "", "a halted need is silent at Stop")
+    conductor_cli("resume re-arms the need", "resume", "--repo", workdir, "--session", session)
+    drive(workdir, session, "halt", implement=False)
+    expect(remote_head(workdir, branch) == head, "the work halt committed is what ships, never redone",
+           f"halted at {head}, shipped {remote_head(workdir, branch)}")
+    finish(branch)
+
+
+def need_follow_up(tag):
+    workdir, session, branch = open_need(tag, "follow")
+    drive(workdir, session, "follow")
+    first, pr = remote_head(workdir, branch), pr_state(branch)
+    nudge = conductor_prompt(workdir, session, f"{tag}-follow-up", "in that PR, also add follow-up.txt")
+    expect(" reopen " in nudge, "a prompt on a ready need's branch offers to reopen that need", nudge)
+    conductor_cli("a ready need reopens on its branch", "reopen", "--repo", workdir, "--session", session,
+                  "--need", branch.split("/", 1)[1])
+    work(workdir, "follow-up", "green")
+    drive(workdir, session, "follow", implement=False)
+    shipped = remote_head(workdir, branch)
+    sh(["git", "-C", workdir, "fetch", "-q", "origin", branch], check=True)
+    rc, _, _ = sh(["git", "-C", workdir, "cat-file", "-e", "FETCH_HEAD:follow-up.txt"])
+    expect(shipped != first and rc == 0, "the follow-up ships on the need's branch, at a new head",
+           f"first ready at {first}, now {shipped}, follow-up.txt shipped: {rc == 0}")
+    after = pr_state(branch)
+    expect(pr and after and after["number"] == pr["number"], "the follow-up ships on the same PR/MR",
+           json.dumps([pr, after]))
+    finish(branch)
+
+
+NEEDS = {"ready": need_ready, "halt-resume": need_halt_resume, "follow-up": need_follow_up}
+
+
 # --- the watcher: generate, run, classify, self-heal, hand off ---------------------------------------
 
 def generate(seed, count):
@@ -577,7 +717,7 @@ def generate(seed, count):
 def file_issue(sc, tag, err):
     what = scenario_label(sc)
     title = f"e2e: persistent failure — {what} (seed tag {tag})"
-    repro = ("twist:" + sc["twist"] if sc.get("twist") else
+    repro = ("need:" + sc["need"] if sc.get("need") else "twist:" + sc["twist"] if sc.get("twist") else
              ("explicit:" if sc.get("mode") == "explicit" else "")
              + f"{sc['flow']}:{sc['gate']}:{sc['ci']}" + (f":{sc['project']}" if sc.get("project") else ""))
     body = (f"The E2E lane failed twice on the same generated scenario.\n\n"
@@ -608,11 +748,13 @@ def main():
     ap.add_argument("--repo", default=E2E_REPO)
     ap.add_argument("--forge", choices=("github", "gitlab"), default="github",
                     help="which sandbox forge to run against (the ledger keeps one proof per forge)")
-    ap.add_argument("--scenario", help="one-off flow:gate:ci[:project] or twist:<name>")
+    ap.add_argument("--scenario", help="one-off flow:gate:ci[:project], twist:<name> or need:<name>")
     ap.add_argument("--projects", action="store_true",
                     help="full-integration suite over the project archetypes (auto-detected gates)")
     ap.add_argument("--twists", action="store_true",
                     help="human-divergence situations (dirty start, amend, manual push, review loop…)")
+    ap.add_argument("--needs", action="store_true",
+                    help="delivery-conductor needs, driven from open to a ready PR/MR")
     ap.add_argument("--explicit", action="store_true",
                     help="the EXPLICIT-default set: declaration-driven pipeline, turn-1 inaction")
     ap.add_argument("--coverage", action="store_true", help="print the proven-situations ledger")
@@ -633,6 +775,8 @@ def main():
             mode, parts = {"mode": "explicit"}, parts[1:]
         if parts[0] == "twist":
             scenarios = [{"twist": parts[1]}]
+        elif parts[0] == "need":
+            scenarios = [{"need": parts[1]}]
         else:
             scenarios = [{"flow": parts[0], "gate": parts[1], "ci": parts[2],
                           **({"project": parts[3]} if len(parts) > 3 else {}), **mode}]
@@ -642,6 +786,8 @@ def main():
         scenarios = ledger_spaces()["twists"]
     elif args.explicit:
         scenarios = ledger_spaces()["explicit"]
+    elif args.needs:
+        scenarios = ledger_spaces()["needs"]
     elif args.projects:
         scenarios = ledger_spaces()["projects"]
     else:
