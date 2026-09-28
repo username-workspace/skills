@@ -16,9 +16,10 @@ that is not done:
 
 | Stage | Owner | Done when |
 |---|---|---|
+| contracting | proof-of-fix | every criterion of the need has a probe recorded failing, or a waiver |
 | implementing | ship-when-done | the work is committed and the branch is ahead of its base |
 | gating | ship-when-done | the project gate passed at this work state |
-| proving | proof-of-fix | every repro the need's sessions recorded passes at this work state |
+| proving | proof-of-fix | every probe of the need (its criteria's, and any repro its sessions recorded) passes at this work state |
 | reviewing | merge-review | a review recorded for the exact HEAD scores at or above the threshold |
 | shipping | ship-when-done | declared, pushed at HEAD, PR/MR open |
 | ci | mr-watchdog | the watcher's verdict for the exact HEAD is green |
@@ -37,16 +38,21 @@ The UserPromptSubmit hook tells you when a prompt could open a need. Before any 
 
 ```bash
 python3 "${SKILL}" open --repo . --summary '<imperative summary>' --type feat \
-  --criterion '<acceptance criterion and the probe that shows it>'
+  --criterion '<what must be true once delivered>' [--criterion '<another>']
 ```
+
+A need has at least one criterion; each gets an id (`c1`, `c2`, …). Before any edit, record each
+criterion's probe with proof-of-fix, failing now (`open`'s reply names the commands in `contract`); a
+criterion that is not behavioural is waived with its reason. The contracting stage holds the work until
+every criterion has one, and the proving stage requires every probe green at the shipped head.
 
 The prompt itself is the one the UserPromptSubmit hook captured for this turn, verbatim. `open` creates
 `need/<id>` from the base (the default branch of the remote the need ships to, as last fetched), so no
 earlier work counts as the need's, and refuses a working tree
 with changes the need did not produce (`--adopt-changes` carries them in on purpose), a worktree another
 need still holds (one need per worktree: open the next one in another worktree), a repo outside the AUTO
-scope, a repo without a remote, and a repo where a stage owner is missing. For a bug, record the failing repro with proof-of-fix
-before the fix: the proving stage then requires it green.
+scope, a repo without a remote, and a repo where a stage owner is missing. For a bug, the failing repro is
+one of the need's criteria, recorded the same way.
 
 ## While a need is in flight
 
@@ -57,7 +63,7 @@ Every human prompt is classified before the need advances, with one command:
 | a request to stop | `halt`: the need is blocked, uncommitted work is committed locally, the branch stays held |
 | a request to continue a blocked need | `resume` |
 | a request to drop the need | `abandon`: blocked for good, the branch stays held until `release` |
-| a change to what the need must deliver | `amend --criterion '<criterion>'` |
+| a change to what the need must deliver | `amend --criterion '<criterion>'`: the need goes back to contracting for its probe |
 | a question or a status check | `note`, then answer it |
 
 `release` hands a need's branch back to the siblings, and a need that reaches `ready` does the same: both
@@ -68,6 +74,12 @@ released.
 A follow-up on a need that reached `ready` (review comments, a change to its PR/MR) reopens it on its
 branch instead of opening a new one: the prompt hook offers `reopen --need <id>` while the worktree is on
 that branch. Then implement the follow-up and end your turn; the conductor drives it to ready again.
+
+## The report
+
+At `ready` the conductor hands you the report to relay: the need and its branch, the driven time
+(blocked time excluded), each criterion's probe with its red run and its green run (or the waiver), the
+tokens each model spent on the need's sessions and their subagents, and each stage's evidence.
 
 ## Breakers
 

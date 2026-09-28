@@ -209,6 +209,7 @@ on, so a new HEAD sends the need back to the earliest stale stage by constructio
 
 | Stage | Owner | Done when |
 |---|---|---|
+| contracting | proof-of-fix | every criterion of the need has a probe recorded failing (bound to its work state, its files pinned) or a waiver |
 | implementing | ship-when-done | the work is committed and the branch is ahead of its base |
 | gating | ship-when-done | `gate` passed at this work state, the tree unchanged while it ran |
 | proving | proof-of-fix | every probe of the need (its criteria's, and the repros its sessions recorded) passed at this work state |
@@ -245,7 +246,11 @@ work state, on a stage failing too many times in a row (three reviews, six other
 done resets it), or past eight hours of driven time (`resume` restarts the clock). A blocked or
 abandoned need keeps its branch held (driven) until `resume` or `release`; `release` and `ready` hold
 the branch through the rest of the deciding prompt only (`need_holds()`, whatever the session's scope),
-so no sibling speaks in that turn. The ledger then keeps the need whole in its history: a follow-up on a
+so no sibling speaks in that turn. At `ready` the conductor hands the model a report to relay: each
+criterion's probe (its red run and its green run, or the waiver), the driven time (the need's active
+intervals, blocked time excluded), and the tokens each model spent on the need's sessions and their
+subagents within those intervals. The ledger then keeps the need whole in its history (the last 20; a
+need that falls off has its probes forgotten through proof-of-fix's CLI): a follow-up on a
 `ready` need (review comments, a change to its PR/MR) reopens it on its branch (`conductor.py reopen`).
 
 ## 6. Engagement modes
