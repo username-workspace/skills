@@ -1,7 +1,7 @@
 {
   "name": "claude-remote-spawn",
-  "version": "1.5.4",
-  "description": "Spawn or resume a persistent, remote-controllable Claude Code session you can drive from your phone or desktop (PTY-backed, survives detached), or open one in a new local terminal tab (macOS) to watch it live where you launched it. Terminal-agnostic, cross-platform.",
+  "version": "1.6.0",
+  "description": "Spawn or resume a remote-controllable Claude Code session you can drive from your terminal, phone or desktop: opened by default in a new tab of the terminal you launched it from (tmux, iTerm2, Terminal.app, WezTerm, kitty, Konsole, GNOME Terminal), or detached in a persistent PTY with --detach. Cross-platform, no dependency.",
   "author": {
     "name": "Username",
     "email": "admin@username.digital"

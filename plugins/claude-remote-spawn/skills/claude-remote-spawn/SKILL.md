@@ -1,15 +1,16 @@
 ---
 name: claude-remote-spawn
-description: Spawn a PERSISTENT, VISIBLE Claude Code session you can drive from your phone or desktop (Remote Control). Runs `claude --remote-control <name>` inside a PTY so it appears in `claude agents` and in Remote Control and stays alive until you stop it. Terminal-agnostic, cross-platform (macOS + Linux). Or `open` the session in a NEW local terminal tab (macOS iTerm/Terminal.app) to watch and drive it live where you launched it — no dependency, ephemeral (closing the tab ends it). Use when asked to spawn a remote-controllable Claude session, launch a persistent agent you can steer from your phone, keep a Claude session running detached from your terminal, open a child session in a visible local terminal tab, or resume/respawn an existing session remotely from its id (or from a description, by composing with the find-session skill). Subcommands via driver.sh — spawn / open / resume / list / stop / check.
+description: Spawn a VISIBLE Claude Code session you can drive from your terminal, phone or desktop (Remote Control). By default `spawn` opens it in a NEW terminal tab where you launched it (tmux, iTerm2, Terminal.app, WezTerm, kitty, Konsole, GNOME Terminal, else x-terminal-emulator) running `claude --remote-control <name>`; with no scriptable terminal it falls back to detached. `spawn --detach` runs it PERSISTENT inside a PTY instead, alive until you stop it. Cross-platform (macOS + Linux), no dependency. Use when asked to spawn a remote-controllable Claude session, launch a persistent agent you can steer from your phone, keep a Claude session running detached from your terminal, open a child session in a visible local terminal tab, or resume/respawn an existing session remotely from its id (or from a description, by composing with the find-session skill). Subcommands via driver.sh — spawn / open / resume / list / stop / check.
 ---
 
 # claude-remote-spawn
 
-> `spawn` launches a **persistent, visible** Claude Code session — `claude --remote-control <name>`
-> run inside a **PTY** (`script(1)`) — so it shows up in `claude agents` **and** in **Remote
-> Control** (phone/desktop), and stays alive until you `stop` it.
+> `spawn` launches a **visible** Claude Code session — `claude --remote-control <name>` — in a **new
+> tab of your terminal**, so you see and drive it where you launched it, and it shows up in `claude
+> agents` **and** in **Remote Control** (phone/desktop). `spawn --detach` runs it in a **PTY**
+> (`script(1)`) instead, persistent until you `stop` it.
 
-`spawn` uses `--permission-mode auto` (auto-approve) by default; set `CRS_HEADLESS_DANGEROUS=1`
+Sessions use `--permission-mode auto` (auto-approve) by default; set `CRS_HEADLESS_DANGEROUS=1`
 for `--dangerously-skip-permissions`, or `CRS_HEADLESS_PERM_FLAGS` for an exact override.
 
 ## Usage
@@ -21,8 +22,8 @@ e.g. just a session name) runs `open`.
 
 | Subcommand | Effect |
 |---|---|
-| `open [name] [--model M] [--prompt 'text']` | **DEFAULT.** Launch the session in a **new local terminal tab** (macOS iTerm/Terminal.app) so you see and drive it **live where you launched it** — **ephemeral**: closing the tab ends it (no phone-driving after). `--prompt` submits an initial instruction, so the session starts working unattended |
-| `spawn [name] [--model M] [--prompt 'text']` | Launch a **persistent, detached** session (Remote Control + phone); name from context (else NATO: alpha/bravo/charlie…) |
+| `spawn [name] [--model M] [--prompt 'text'] [--detach]` | Launch the session in a **new terminal tab** so you see and drive it **live where you launched it**; with no scriptable terminal (SSH, headless) it falls back to detached. `--detach` = **persistent, detached** PTY session (Remote Control + phone). `--prompt` submits an initial instruction, so the session starts working unattended. Name from context (else NATO: alpha/bravo/charlie…) |
+| `open [name] [--model M] [--prompt 'text']` | **DEFAULT** (bare invocation). Same tab as `spawn`, but **tab-only**: fails with the launcher path instead of detaching |
 | `resume <id> [name] [--in-place] [--model M]` | Respawn an **existing** session by id; forks a fresh drivable id by default (`--in-place` = same id) |
 | `list` | List spawned sessions (live/dead, with the model if one was set) |
 | `stop <name>` | Stop a session (kills the PTY + claude, cleans state) |
@@ -36,6 +37,7 @@ alias (`opus`, `sonnet`, `fable`, …) or a full id (`claude-fable-5`) — and i
 them. Omit it to use your default; `check` prints the alias list from your own `claude --help`.
 
     driver.sh spawn reviewer --model opus
+    driver.sh spawn nightly --detach
     driver.sh resume <id> --model sonnet
 
 ## Naming
@@ -49,7 +51,7 @@ Sessions should be **recognizable**, not random:
   title, which also tracks the latest exchanges) and shown as the Remote Control display name; pass
   a `name` to override.
 
-## How `spawn` works (and why it stays visible)
+## How `spawn --detach` works (and why it stays visible)
 
 - Runs `claude --remote-control <name>` inside a **PTY** via `script(1)` — the only way an
   interactive Remote-Control session survives detached — the same pattern a persistent
@@ -60,24 +62,27 @@ Sessions should be **recognizable**, not random:
 - It's a **long-running, visible** session — not a one-shot that exits immediately and leaves nothing
   to drive.
 
-## `open` — run it in a local terminal tab
+## The terminal tab (`spawn`, `open`)
 
-`open` is the alternative to `spawn` when you want to **see and drive the session in your own
-terminal**, where you launched the skill — not only from your phone:
+`spawn` (and `open`) **see and drive the session in your own terminal**, where you launched the
+skill — not only from your phone:
 
-    driver.sh open [name] [--model M] [--prompt 'text']
+    driver.sh spawn [name] [--model M] [--prompt 'text']
 
-- It opens a **new tab** in the terminal that launched the skill (detected via `$TERM_PROGRAM`:
-  **iTerm.app** or **Apple_Terminal**) and runs `claude --remote-control <name>` directly in it.
+- It opens a **new tab** in the terminal that launched the skill and runs `claude --remote-control
+  <name>` directly in it. Detection, first match wins: **tmux** (`$TMUX` → new window), **WezTerm**
+  (`wezterm cli spawn`), **kitty** (`kitty @ launch --type=tab`, needs `allow_remote_control`),
+  **Konsole** (`--new-tab`), **GNOME Terminal** (`--tab`), **iTerm2** / **Terminal.app**
+  (`osascript`), else **`x-terminal-emulator`** (new window) when a display is present.
 - While the tab is open the session is a normal Remote-Control session too (shows up in `claude
   agents`, drivable from the phone). It also appears in `list` (marked `window`) and `stop` works.
 - **It is ephemeral by design.** There is no detach engine (no tmux/screen), so the session's life is
   tied to the tab: **close the tab and the session ends** — and there's no phone-driving after that.
   This is the deliberate trade for "no dependency, visible in my terminal". When you need a session
-  that survives and stays phone-drivable, use `spawn` instead.
-- On a terminal it can't script (anything other than iTerm/Terminal.app, or Linux/headless), `open`
-  doesn't fail silently: it prints the path of a ready-to-run launcher you can execute in **any**
-  terminal yourself.
+  that survives and stays phone-drivable, use `spawn --detach`.
+- With no terminal it can script (SSH, headless, an unknown terminal), `spawn` says so and **falls
+  back to detached**, so the session still exists; `open` fails instead and prints the path of a
+  ready-to-run launcher you can execute in **any** terminal yourself.
 
 ## Resume an existing session
 
@@ -129,9 +134,9 @@ next `spawn`/`stop` re-evaluates it.
   `CRS_CLAUDE_CONFIG`): the same `hasTrustDialogAccepted` flag the dialog's "Yes" writes, keyed by the
   physical path. Needs `python3`; without it a one-line hint is printed and the dialog has to be
   answered in the session. Runs in `$PWD`; override with `CRS_SPAWN_CWD`.
-- `spawn`/`resume` need `script(1)` (present on macOS + Linux); `open` needs `osascript` (macOS) to
-  open the tab.
-- State lives in `~/.claude/headless/<name>.{spawn,log}` (plus `<name>.cmd`, the launcher, for `open`).
+- `spawn --detach`/`resume` need `script(1)` (present on macOS + Linux); the tab needs the terminal's
+  own CLI (`osascript` for iTerm2/Terminal.app).
+- State lives in `~/.claude/headless/<name>.{spawn,log}` (plus `<name>.cmd`, the launcher, for a tab session).
 
 ## Env
 
