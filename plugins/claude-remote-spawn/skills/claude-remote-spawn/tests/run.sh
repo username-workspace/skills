@@ -26,7 +26,7 @@ chmod +x "$ROOT/bin/script"
 # stub osascript so 'open' never opens a real terminal tab — record args + the AppleScript it's fed
 cat > "$ROOT/bin/osascript" <<EOF
 #!/usr/bin/env bash
-{ printf 'ARGS:%s\n' "\$*"; cat; printf '\n---\n'; } >> "$ROOT/osascript.cap"
+{ printf 'ARGS:%s\n' "\$*"; cat; w="\$(cat "$ROOT/watch.pid" 2>/dev/null)"; [ -n "\$w" ] && kill -0 "\$w" 2>/dev/null && echo "WATCHED_STILL_RUNNING"; printf '\n---\n'; } >> "$ROOT/osascript.cap"
 exit 0
 EOF
 chmod +x "$ROOT/bin/osascript"
@@ -69,8 +69,10 @@ assert_nonzero(){ [ "$1" -ne 0 ] && ok "$2" || ko "$2 — expected nonzero exit,
 
 # Hermetic env: the driver honors CRS_* switches and $HOME, and a runner that is itself a spawned
 # session inherits CRS_SPAWN_CWD, which would override every cwd below. Drop inherited switches (tests
-# set their own per call), give the driver a throwaway HOME, and run from a controlled work dir.
+# set their own per call), give the driver a throwaway HOME, and run from a controlled work dir. The
+# runner's own terminal markers go too: they pick where spawn opens its tab.
 unset CRS_SPAWN_CWD CRS_KEEPAWAKE CRS_HEADLESS_DANGEROUS CRS_HEADLESS_PERM_FLAGS
+unset TERM_PROGRAM TMUX KITTY_WINDOW_ID KONSOLE_VERSION GNOME_TERMINAL_SCREEN DISPLAY WAYLAND_DISPLAY
 export HOME="$ROOT/home"; mkdir -p "$HOME"
 WORK="$ROOT/work"; mkdir -p "$WORK"; cd "$WORK"
 
@@ -211,7 +213,7 @@ perm_line="$(echo "$out" | grep '^perms')"
 assert_eq "perms  : " "$perm_line" "15. CRS_HEADLESS_PERM_FLAGS='' → empty perm"
 
 # 16. spawn --model with no value → exit 1 + clear message
-out=$(run_rc spawn --model)
+out=$(run_rc spawn --detach --model)
 rc="${out##*$'\n'}"; body="${out%$'\n'*}"
 assert_eq 1 "$rc" "16. spawn --model (no value) → exit 1"
 assert_contains "--model needs a value" "$body" "16. spawn --model (no value) → clear message"
@@ -224,7 +226,7 @@ assert_contains "--model needs a value" "$body" "17. resume --model (no value) �
 
 # 18. spawn --model <m> passes '--model <m>' straight to claude, records it, reports it
 : > "$ROOT/script.cap"
-out=$(run spawn modeltest --model claude-fable-5)
+out=$(run spawn --detach modeltest --model claude-fable-5)
 for _ in $(seq 1 50); do [ -s "$ROOT/script.cap" ] && break; sleep 0.1; done   # the launch is backgrounded
 assert_contains "modeltest" "$out" "18. spawn --model → returns the handle"
 assert_contains "model: claude-fable-5" "$out" "18. spawn --model → reports the model"
@@ -237,7 +239,7 @@ run stop modeltest >/dev/null 2>&1 || true
 
 # 18b. spawn --prompt '<text>' hands the initial instruction to claude as the trailing positional
 : > "$ROOT/script.cap"
-out=$(run spawn promptest --prompt "executetheplan42 phase by phase")
+out=$(run spawn --detach promptest --prompt "executetheplan42 phase by phase")
 for _ in $(seq 1 50); do [ -s "$ROOT/script.cap" ] && break; sleep 0.1; done
 # multi-word prompt exercises the real path; the asserted token survives %q on the Linux branch
 assert_contains "executetheplan42" "$(cat "$ROOT/script.cap" 2>/dev/null)" "18b. --prompt passed through to claude"
@@ -247,18 +249,18 @@ run stop promptest >/dev/null 2>&1 || true
 # 18c. a multi-line, non-ASCII prompt reaches claude as ONE intact argument whatever the login shell
 # (util-linux script runs its -c string through $SHELL; %q quoting is bash-only)
 export CRS_ARGV_CAP="$ROOT/argv.cap"; rm -f "$CRS_ARGV_CAP"
-SHELL=/bin/sh run spawn mlprompt --prompt $'fix the café\nthen ship' >/dev/null 2>&1
+SHELL=/bin/sh run spawn --detach mlprompt --prompt $'fix the café\nthen ship' >/dev/null 2>&1
 for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$CRS_ARGV_CAP" ] && break; sleep 0.2; done
 assert_contains $'<fix the café\nthen ship>' "$(cat "$CRS_ARGV_CAP" 2>/dev/null)" "18c. --prompt survives a non-bash login shell intact"
 unset CRS_ARGV_CAP; run stop mlprompt >/dev/null 2>&1 || true
-out=$(run_rc spawn --prompt)
+out=$(run_rc spawn --detach --prompt)
 rc="${out##*$'\n'}"; body="${out%$'\n'*}"
 assert_eq 1 "$rc" "18b. spawn --prompt (no value) → exit 1"
 assert_contains "--prompt needs a value" "$body" "18b. spawn --prompt (no value) → clear message"
 
 # 19. spawn without --model passes NO --model flag (default model)
 : > "$ROOT/script.cap"
-out=$(run spawn nomodel)
+out=$(run spawn --detach nomodel)
 for _ in $(seq 1 50); do [ -s "$ROOT/script.cap" ] && break; sleep 0.1; done
 cap="$(cat "$ROOT/script.cap" 2>/dev/null)"
 { [ -n "$cap" ] && case "$cap" in *--model*) false;; *) true;; esac; } && ok "19. no --model flag when omitted (claude default)" || ko "19. no --model when omitted — cap=[$cap]"
@@ -292,7 +294,7 @@ sp="$(sed -n 's/^subshell=//p' "$STATE/$handle.spawn" 2>/dev/null | head -1)"
 run stop "$handle" >/dev/null 2>&1 || true
 
 # 22. SECURITY: user-supplied name is slugified — no path traversal out of STATE_DIR
-out=$(run spawn "../outside/evil")
+out=$(run spawn --detach "../outside/evil")
 handle="$(echo "$out" | head -1)"
 assert_eq "outside-evil" "$handle" "22. hostile name slugified"
 [ ! -e "$ROOT/outside" ] && ok "22. nothing written outside STATE_DIR" || ko "22. path traversal: wrote outside STATE_DIR"
@@ -302,7 +304,7 @@ run stop "$handle" >/dev/null 2>&1 || true
 
 # 23. stop kills the WHOLE process group — the immortal `tail -f /dev/null` does not leak
 : > "$ROOT/script.cap"
-out=$(run spawn leaktest)
+out=$(run spawn --detach leaktest)
 handle="$(echo "$out" | head -1)"
 for _ in $(seq 1 50); do [ -s "$STATE/$handle.spawn" ] && break; sleep 0.1; done
 pg="$(sed -n 's/^pgid=//p' "$STATE/$handle.spawn" 2>/dev/null | head -1)"
@@ -321,8 +323,9 @@ assert_contains "terminal tab" "$out" "24. open → reports it opened a tab"
 assert_contains "mode=window" "$(cat "$STATE/winalpha.spawn" 2>/dev/null)" "24. open → records mode=window"
 assert_contains "--remote-control winalpha" "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher runs claude --remote-control <name>"
 assert_contains "-n winalpha" "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher sets the display name"
-assert_contains "close-tab" "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher self-closes its tab when the session ends"
-assert_absent "exec " "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher does NOT exec (must regain control to close the tab)"
+assert_absent "close-tab" "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher never asks the terminal to close its own running tab (iTerm/Terminal confirm prompt)"
+assert_absent "osascript" "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher scripts no terminal from inside the tab"
+assert_absent "exec " "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → launcher does NOT exec claude (stop finds claude as its descendant)"
 assert_contains "unset CLAUDECODE" "$(cat "$STATE/winalpha.cmd" 2>/dev/null)" "24. open → the launcher drops the launching session's identity, even when run by hand"
 assert_contains "ARGS" "$(cat "$ROOT/osascript.cap" 2>/dev/null)" "24. open → osascript was invoked"
 assert_contains "create tab" "$(cat "$ROOT/osascript.cap" 2>/dev/null)" "24. open (iTerm) → asks for a tab"
@@ -376,20 +379,11 @@ out=$(open_run open winstop)
 run stop winstop >/dev/null 2>&1 || true
 { [ ! -e "$STATE/winstop.spawn" ] && [ ! -e "$STATE/winstop.cmd" ]; } && ok "31. stop → removes window state + launcher" || ko "31. stop → left window state/launcher behind"
 
-# 32. close-tab (iTerm) → asks iTerm to close the launcher's OWN session, by its guid, from the tab env
+# 32. Terminal.app → the launcher replaces the tab's shell, so the tab ends when the session ends
 : > "$ROOT/osascript.cap"
-out=$(CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" \
-      TERM_PROGRAM=iTerm.app ITERM_SESSION_ID="w0t0p0:GUID-abc-123" bash "$DRIVER" close-tab; echo "rc=$?")
-cap="$(cat "$ROOT/osascript.cap" 2>/dev/null)"
-assert_contains "rc=0" "$out" "32. close-tab → always exits 0 (best-effort)"
-assert_contains "close s" "$cap" "32. close-tab (iTerm) → asks iTerm to close the session"
-assert_contains "GUID-abc-123" "$cap" "32. close-tab → targets the tab's own session guid"
-
-# 32b. close-tab on a terminal it can't script → no osascript call, still exits 0
-: > "$ROOT/osascript.cap"
-out=$(CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" TERM_PROGRAM=Ghostty bash "$DRIVER" close-tab; echo "rc=$?")
-assert_contains "rc=0" "$out" "32b. close-tab (unsupported) → exit 0 (no-op)"
-assert_eq "" "$(cat "$ROOT/osascript.cap" 2>/dev/null)" "32b. close-tab (unsupported) → no osascript call"
+TP=Apple_Terminal; out=$(open_run open interm); unset TP
+assert_contains "do script \"exec $STATE/interm.cmd\"" "$(cat "$ROOT/osascript.cap" 2>/dev/null)" "32. open (Terminal.app) → do script exec <launcher>"
+run stop interm >/dev/null 2>&1 || true
 
 # 33–38. keep-awake (macOS only — the feature is a no-op on Linux, so the assertions can't hold there)
 if [ "$(uname -s)" = Darwin ]; then
@@ -397,20 +391,20 @@ if [ "$(uname -s)" = Darwin ]; then
 
   # 33. spawn on AC → keep-awake enabled: sudo asked to set disablesleep 1 (lid-closed sleep off)
   echo "AC Power" > "$ROOT/power"; : > "$ROOT/sudo.cap"; rm -f "$STATE/.keepawake-warned"
-  out=$(run spawn wakealpha)
+  out=$(run spawn --detach wakealpha)
   assert_contains "/usr/bin/pmset disablesleep 1" "$(cat "$ROOT/sudo.cap" 2>/dev/null)" "33. spawn on AC → holds the Mac awake (disablesleep 1)"
   wa_sp wakealpha
 
   # 34. spawn on battery → never fights the battery: holds 0, not 1
   echo "Battery Power" > "$ROOT/power"; : > "$ROOT/sudo.cap"
-  out=$(run spawn wakebatt)
+  out=$(run spawn --detach wakebatt)
   assert_contains "/usr/bin/pmset disablesleep 0" "$(cat "$ROOT/sudo.cap" 2>/dev/null)" "34. spawn on battery → does not hold sleep (disablesleep 0)"
   assert_absent "disablesleep 1" "$(cat "$ROOT/sudo.cap" 2>/dev/null)" "34. spawn on battery → never sets disablesleep 1"
   echo "AC Power" > "$ROOT/power"
   wa_sp wakebatt
 
   # 35. stop of the last (no live) session → releases the hold (disablesleep 0)
-  out=$(run spawn wakerel); handle="$(echo "$out" | head -1)"
+  out=$(run spawn --detach wakerel); handle="$(echo "$out" | head -1)"
   sp="$(sed -n 's/^subshell=//p' "$STATE/$handle.spawn" 2>/dev/null | head -1)"; [ -n "$sp" ] && { pkill -P "$sp" 2>/dev/null; kill "$sp" 2>/dev/null; }
   : > "$ROOT/sudo.cap"
   run stop "$handle" >/dev/null 2>&1 || true
@@ -419,7 +413,7 @@ if [ "$(uname -s)" = Darwin ]; then
   # 36. CRS_KEEPAWAKE=0 → keep-awake fully disabled: NO sudo call at all
   : > "$ROOT/sudo.cap"
   out=$(CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" \
-        CRS_KEEPAWAKE=0 bash "$DRIVER" spawn wakeoff 2>&1)
+        CRS_KEEPAWAKE=0 bash "$DRIVER" spawn --detach wakeoff 2>&1)
   assert_eq "" "$(cat "$ROOT/sudo.cap" 2>/dev/null)" "36. CRS_KEEPAWAKE=0 → no sudo/pmset call"
   wa_sp wakeoff
 
@@ -434,7 +428,7 @@ exit 1
 EOF
   chmod +x "$ROOT/bin/sudo"
   rm -f "$STATE/.keepawake-warned"
-  out=$(unset USER; run_rc spawn wakedeg); rc="${out##*$'\n'}"; body="${out%$'\n'*}"
+  out=$(unset USER; run_rc spawn --detach wakedeg); rc="${out##*$'\n'}"; body="${out%$'\n'*}"
   assert_eq 0 "$rc" "38. keep-awake with no sudo rule → spawn still succeeds (never blocks), even without \$USER (cron, systemd)"
   assert_contains "keep-awake" "$body" "38. no sudo rule → prints a one-line enable hint"
   wa_sp wakedeg
@@ -462,7 +456,7 @@ if command -v pgrep >/dev/null 2>&1; then
 
   # 39. Linux + AC: spawn takes a systemd-inhibit hold (sleep + lid switch) and records it; stop releases it
   : > "$ROOT/inhibit.cap"; rm -f "$STATE/.keepawake.pid" "$STATE/.keepawake-warned"
-  out=$(lrun spawn linwake)
+  out=$(lrun spawn --detach linwake)
   for _ in $(seq 1 50); do [ -s "$ROOT/inhibit.cap" ] && break; sleep 0.1; done   # holder is detached/async
   assert_contains "handle-lid-switch" "$(cat "$ROOT/inhibit.cap" 2>/dev/null)" "39. Linux/AC spawn → systemd-inhibit blocks sleep + lid switch"
   assert_contains "--mode=block" "$(cat "$ROOT/inhibit.cap" 2>/dev/null)" "39. Linux → block-mode inhibitor"
@@ -472,7 +466,7 @@ if command -v pgrep >/dev/null 2>&1; then
 
   # 40. Linux + battery: never inhibits, never records a holder (does not fight the battery)
   : > "$ROOT/inhibit.cap"; rm -f "$STATE/.keepawake.pid"
-  out=$(OAP=1 lrun spawn linbatt)
+  out=$(OAP=1 lrun spawn --detach linbatt)
   for _ in $(seq 1 50); do [ -e "$STATE/linbatt.spawn" ] && break; sleep 0.1; done
   assert_eq "" "$(cat "$ROOT/inhibit.cap" 2>/dev/null)" "40. Linux/battery spawn → does not inhibit"
   [ ! -e "$STATE/.keepawake.pid" ] && ok "40. Linux/battery → no holder recorded" || ko "40. Linux/battery → unexpected holder"
@@ -498,14 +492,14 @@ run stop trustopen >/dev/null 2>&1 || true
 
 # 42. already trusted → config untouched (byte-identical), nothing reported
 cp "$CONFIG" "$ROOT/claude.before"
-out=$(cd "$ROOT" && run spawn trustsame)
+out=$(cd "$ROOT" && run spawn --detach trustsame)
 assert_absent "trust: pre-approved" "$out" "42. spawn on a trusted cwd → silent"
 cmp -s "$CONFIG" "$ROOT/claude.before" && ok "42. spawn on a trusted cwd → config byte-identical" || ko "42. spawn on a trusted cwd → config rewritten"
 run stop trustsame >/dev/null 2>&1 || true
 
 # 43. no config file yet → spawn still succeeds and creates the trusted entry
 rm -f "$CONFIG"
-out=$(cd "$ROOT" && run_rc spawn trustnew); rc="${out##*$'\n'}"
+out=$(cd "$ROOT" && run_rc spawn --detach trustnew); rc="${out##*$'\n'}"
 assert_eq 0 "$rc" "43. missing config → spawn still succeeds"
 assert_contains "\"$TRUST_CWD\"" "$(cat "$CONFIG" 2>/dev/null)" "43. missing config → trusted entry created"
 run stop trustnew >/dev/null 2>&1 || true
@@ -528,7 +522,7 @@ mkdir -p "$ROOT/noprocps"
 for d in /usr/local/bin /usr/bin /bin /usr/sbin /sbin; do for f in "$d"/*; do n="${f##*/}"
   case "$n" in pgrep|pkill) ;; *) [ -e "$ROOT/noprocps/$n" ] || ln -s "$f" "$ROOT/noprocps/$n" 2>/dev/null ;; esac
 done; done
-out=$(PATH="$ROOT/bin:$ROOT/noprocps" bash "$DRIVER" spawn noprocps 2>&1); rc=$?
+out=$(PATH="$ROOT/bin:$ROOT/noprocps" bash "$DRIVER" spawn --detach noprocps 2>&1); rc=$?
 assert_eq 1 "$rc" "46. no pgrep/pkill → spawn exits 1"
 assert_contains "procps" "$out" "46. no pgrep/pkill → says to install procps"
 assert_absent "spawned" "$out" "46. no pgrep/pkill → no invisible session recorded"
@@ -536,7 +530,7 @@ assert_contains "procps : NOT FOUND" "$(PATH="$ROOT/bin:$ROOT/noprocps" bash "$D
 # 47. a spawned session is top-level: none of the launching session's identity reaches it
 MARKERS="CLAUDECODE CLAUDE_PID CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN TRACEPARENT"
 export CRS_ENV_CAP="$ROOT/env.cap" CRS_ARGV_CAP="$ROOT/argv47.cap"; rm -f "$CRS_ENV_CAP"
-(for m in $MARKERS; do export "$m=from-parent"; done; export CLAUDE_CONFIG_DIR="$ROOT/account2" CLAUDE_CODE_USE_BEDROCK=1; run spawn toplevel) >/dev/null 2>&1
+(for m in $MARKERS; do export "$m=from-parent"; done; export CLAUDE_CONFIG_DIR="$ROOT/account2" CLAUDE_CODE_USE_BEDROCK=1; run spawn --detach toplevel) >/dev/null 2>&1
 for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$CRS_ENV_CAP" ] && break; sleep 0.2; done
 envcap="$(cat "$CRS_ENV_CAP" 2>/dev/null)"
 assert_contains "CLAUDE_CONFIG_DIR=$ROOT/account2" "$envcap" "47. spawn: the account it runs under (CLAUDE_CONFIG_DIR) still reaches the new session"
@@ -556,7 +550,7 @@ kill -0 "$stranger" 2>/dev/null && ok "48. a process group recycled by the OS is
 kill -0 "$namesake" 2>/dev/null && ok "48. a namesake session outside the recorded group is never killed" || ko "48. a namesake session outside the recorded group is never killed"
 kill "$stranger" "$namesake" 2>/dev/null; wait "$stranger" "$namesake" 2>/dev/null
 # 49. stop recognises its session whatever the caller's locale or time zone
-out=$(LANG=fr_FR.UTF-8 LC_ALL=fr_FR.UTF-8 TZ=Pacific/Auckland run spawn locale49); h49="$(echo "$out" | head -1)"
+out=$(LANG=fr_FR.UTF-8 LC_ALL=fr_FR.UTF-8 TZ=Pacific/Auckland run spawn --detach locale49); h49="$(echo "$out" | head -1)"
 for _ in $(seq 1 50); do [ -s "$STATE/$h49.spawn" ] && break; sleep 0.1; done
 pg49="$(sed -n 's/^pgid=//p' "$STATE/$h49.spawn" 2>/dev/null | head -1)"; sleep 0.3
 LANG=C LC_ALL=C TZ=UTC run stop "$h49" >/dev/null 2>&1; sleep 0.3
@@ -566,12 +560,25 @@ ps -A -o pgid=,stat= | awk -v g="$pg49" '$1==g && $2 !~ /^Z/' | grep -q . && ko 
 printf '#!/usr/bin/env bash\necho $$ > "%s"\nexec sleep 30\n' "$ROOT/win50.pid" > "$ROOT/bin/claude-sleep"; chmod +x "$ROOT/bin/claude-sleep"
 : > "$ROOT/osascript.cap"; rm -f "$ROOT/win50.pid"
 out=$(CRS_CLAUDE_BIN="$ROOT/bin/claude-sleep" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" TERM_PROGRAM=iTerm.app bash "$DRIVER" open win50 2>&1)
-bash "$STATE/win50.cmd" >/dev/null 2>&1 & launcher50=$!
+TERM_PROGRAM=iTerm.app ITERM_SESSION_ID="w0t0p0:GUID-50" bash "$STATE/win50.cmd" >/dev/null 2>&1 & launcher50=$!
+echo "$launcher50" > "$ROOT/watch.pid"
 for _ in $(seq 1 50); do [ -s "$ROOT/win50.pid" ] && break; sleep 0.1; done; claude50="$(cat "$ROOT/win50.pid" 2>/dev/null)"
+assert_contains "tab=w0t0p0:GUID-50" "$(cat "$STATE/win50.spawn" 2>/dev/null)" "50. the launcher records its own tab"
+: > "$ROOT/osascript.cap"
 run stop win50 >/dev/null 2>&1; sleep 0.5
+cap50="$(cat "$ROOT/osascript.cap" 2>/dev/null)"; rm -f "$ROOT/watch.pid"
+assert_contains 'if id of s is "GUID-50" then close s' "$cap50" "50. stop closes the session's iTerm tab, by its id"
+assert_absent "WATCHED_STILL_RUNNING" "$cap50" "50. the tab is closed only once its launcher is gone (no 'close running session?' prompt)"
 { [ -n "$claude50" ] && ! kill -0 "$claude50" 2>/dev/null; } && ok "50. stop ends a window session's claude" || ko "50. stop ends a window session's claude (pid=$claude50)"
-kill -0 "$launcher50" 2>/dev/null && ko "50. the launcher regains control and exits (closing its tab)" || ok "50. the launcher regains control and exits (closing its tab)"
+kill -0 "$launcher50" 2>/dev/null && ko "50. the launcher exits with its session" || ok "50. the launcher exits with its session"
 [ -n "$claude50" ] && kill "$claude50" 2>/dev/null; kill "$launcher50" 2>/dev/null; wait "$launcher50" 2>/dev/null
+# 50b. Terminal.app inherits a stale ITERM_SESSION_ID when launched from iTerm: the tab is its tty, never that id
+CRS_CLAUDE_BIN="$ROOT/bin/claude" CRS_HEADLESS_STATE="$STATE" CRS_CLAUDE_CONFIG="$CONFIG" TERM_PROGRAM=Apple_Terminal bash "$DRIVER" open win50b >/dev/null 2>&1
+TERM_PROGRAM=Apple_Terminal ITERM_SESSION_ID="w0t0p0:STALE" bash "$STATE/win50b.cmd" </dev/null >/dev/null 2>&1
+assert_absent "STALE" "$(cat "$STATE/win50b.spawn" 2>/dev/null)" "50b. Terminal.app tab never recorded by an inherited iTerm id"
+assert_contains "term=Apple_Terminal" "$(cat "$STATE/win50b.spawn" 2>/dev/null)" "50b. Terminal.app tab recorded with its terminal"
+run stop win50b >/dev/null 2>&1 || true
+
 # 51. a launcher run by hand after open gave up leaves no half record behind
 rm -f "$ROOT/win50.pid" "$STATE/win51.spawn"
 CRS_CLAUDE_BIN="$ROOT/bin/claude-sleep" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" TERM_PROGRAM=iTerm.app bash "$DRIVER" open win51 >/dev/null 2>&1
@@ -594,7 +601,7 @@ run stop win52 >/dev/null 2>&1; sleep 0.5
 rm -f "$ROOT/win50.pid"
 CRS_CLAUDE_BIN="$ROOT/bin/claude-sleep" CRS_HEADLESS_STATE="$STATE" CLAUDE_PROJECTS_DIR="$PROJECTS" CRS_CLAUDE_CONFIG="$CONFIG" TERM_PROGRAM=iTerm.app bash "$DRIVER" open cross53 >/dev/null 2>&1
 cp "$STATE/cross53.cmd" "$ROOT/stale53.cmd"; run stop cross53 >/dev/null 2>&1
-run spawn cross53 >/dev/null 2>&1; for _ in $(seq 1 50); do [ -s "$STATE/cross53.spawn" ] && break; sleep 0.1; done
+run spawn --detach cross53 >/dev/null 2>&1; for _ in $(seq 1 50); do [ -s "$STATE/cross53.spawn" ] && break; sleep 0.1; done
 pg53="$(sed -n 's/^pgid=//p' "$STATE/cross53.spawn" 2>/dev/null | head -1)"
 sleep 1.1; bash "$ROOT/stale53.cmd" >/dev/null 2>&1 & l53=$!
 for _ in $(seq 1 50); do [ -s "$ROOT/win50.pid" ] && break; sleep 0.1; done; c53="$(cat "$ROOT/win50.pid" 2>/dev/null)"
@@ -603,6 +610,44 @@ run stop cross53 >/dev/null 2>&1; sleep 0.3
 ps -A -o pgid=,stat= | awk -v g="$pg53" '$1==g && $2 !~ /^Z/' | grep -q . && ko "53. stop still ends the spawned session" || ok "53. stop still ends the spawned session"
 [ -n "$pg53" ] && kill $(ps -A -o pid=,pgid= | awk -v g="$pg53" '$2==g {print $1}') 2>/dev/null
 [ -n "$c53" ] && kill "$c53" 2>/dev/null; kill "$l53" 2>/dev/null; wait "$l53" 2>/dev/null
+# 54. spawn opens a terminal tab by default, not a detached PTY
+: > "$ROOT/osascript.cap"; : > "$ROOT/script.cap"
+out=$(open_run spawn tabdefault); rc=$?
+assert_eq 0 "$rc" "54. spawn (iTerm) → exit 0"
+assert_contains "terminal tab" "$out" "54. spawn → reports it opened a tab"
+assert_contains "mode=window" "$(cat "$STATE/tabdefault.spawn" 2>/dev/null)" "54. spawn → records a window session"
+assert_contains "create tab" "$(cat "$ROOT/osascript.cap" 2>/dev/null)" "54. spawn (iTerm) → asks iTerm for a tab"
+sleep 0.3; assert_eq "" "$(cat "$ROOT/script.cap" 2>/dev/null)" "54. spawn → no detached PTY launched"
+run stop tabdefault >/dev/null 2>&1 || true
+
+# 55. spawn where no tab can be opened → still a session: falls back to detached, leaves no launcher
+: > "$ROOT/script.cap"
+out=$(run_rc spawn tabless); rc="${out##*$'\n'}"; body="${out%$'\n'*}"
+for _ in $(seq 1 50); do [ -s "$ROOT/script.cap" ] && break; sleep 0.1; done
+assert_eq 0 "$rc" "55. spawn without a scriptable terminal → exit 0"
+assert_contains "spawning detached instead" "$body" "55. spawn without a terminal → says it detached"
+assert_contains "--remote-control tabless" "$(cat "$ROOT/script.cap" 2>/dev/null)" "55. spawn without a terminal → detached PTY session"
+assert_absent "mode=window" "$(cat "$STATE/tabless.spawn" 2>/dev/null)" "55. fallback record is a detached one"
+[ ! -e "$STATE/tabless.cmd" ] && ok "55. fallback leaves no launcher behind" || ko "55. fallback left a launcher behind"
+run stop tabless >/dev/null 2>&1 || true
+
+# 56. tmux / GNOME Terminal / Konsole → spawn opens the tab with that terminal's own CLI
+for t in tmux gnome-terminal konsole; do printf '#!/usr/bin/env bash\necho "%s $*" >> "%s"\n' "$t" "$ROOT/term.cap" > "$ROOT/bin/$t"; chmod +x "$ROOT/bin/$t"; done
+: > "$ROOT/term.cap"
+TMUX=/tmp/tmux-sock,1,0 run spawn intmux >/dev/null 2>&1
+assert_contains "tmux new-window $STATE/intmux.cmd" "$(cat "$ROOT/term.cap")" "56. spawn in tmux → tmux new-window runs the launcher"
+GNOME_TERMINAL_SCREEN=/org/gnome/Terminal/screen/1 run spawn ingnome >/dev/null 2>&1
+assert_contains "gnome-terminal --tab -- $STATE/ingnome.cmd" "$(cat "$ROOT/term.cap")" "56. spawn in GNOME Terminal → gnome-terminal --tab"
+KONSOLE_VERSION=230800 run spawn inkonsole >/dev/null 2>&1
+for _ in $(seq 1 20); do grep -q konsole "$ROOT/term.cap" && break; sleep 0.1; done
+assert_contains "konsole --new-tab -e $STATE/inkonsole.cmd" "$(cat "$ROOT/term.cap")" "56. spawn in Konsole → konsole --new-tab"
+for n in intmux ingnome inkonsole; do run stop "$n" >/dev/null 2>&1 || true; done
+rm -f "$ROOT/bin/tmux" "$ROOT/bin/gnome-terminal" "$ROOT/bin/konsole"
+
+# 57. --detach belongs to spawn: open stays tab-only
+out=$(open_run_rc open --detach); rc="${out##*$'\n'}"
+assert_eq 1 "$rc" "57. open --detach → exit 1 (unknown flag)"
+
 echo
 echo "PASS=$PASS FAIL=$FAIL"
 rm -rf "$ROOT"
