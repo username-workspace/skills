@@ -286,11 +286,20 @@ assert_contains 'usage: sso-auth.py' "$out" "19a. unknown subcommand → usage"
 assert_eq 2 "$rc" "19b. unknown subcommand → exit 2"
 python3 "$SSO" >/dev/null 2>&1; assert_eq 2 "$?" "19c. no subcommand → exit 2"
 
-# --- 20. the skill invokes itself on every surface an expired SSO session breaks, not only `aws` ---
+# --- 22. the skill invokes itself on every surface an expired SSO session breaks, not only `aws` ---
 DESC="$(python3 -c "import sys; print(open(sys.argv[1]).read().split('---')[1])" "$(dirname "$SSO")/../skills/aws-remote-auth/SKILL.md")"
 for signal in kubectl EKS 'aws sso login' 'token has expired'; do
-  assert_contains "$signal" "$DESC" "20. description triggers on: $signal"
+  assert_contains "$signal" "$DESC" "22. description triggers on: $signal"
 done
+
+# --- 23. the user never sees tool output: the hook and the login tell the model to write the link in its reply ---
+clear_pending; clear_cache; seed_token "https://my.awsapps.com/start" "$(now_plus -3600)"
+out=$(hook '{"tool_input":{"command":"aws s3 ls --profile dev"}}')
+assert_contains 'write the link and the code in your reply' "$out" "23a. hook reason tells the model to relay the link"
+clear_pending; clear_cache; seed_token "https://my.awsapps.com/start" "$(now_plus -3600)"
+out=$(python3 "$SSO" login dev 2>&1)
+assert_contains 'user_code=WXYZ-7788' "$out" "23b. login prints the autofill link"
+assert_contains 'write the link and the code in your reply' "$out" "23c. login tells the model to relay the link"
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"

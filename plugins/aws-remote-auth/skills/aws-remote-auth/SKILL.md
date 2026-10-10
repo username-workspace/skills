@@ -6,7 +6,8 @@ description: >-
   "token has expired" or "SSO session ... expired"; kubectl against an EKS cluster fails to get a
   token, answers "You must be logged in to the server", or a script reports kubectl unreachable;
   an Athena or SDK call fails on credentials; or any tool output says to run `aws sso login`. Run it
-  instead of asking the user to log in, then rerun what failed. Also to refresh a profile before a
+  instead of asking the user to log in, write its link and code in your reply, then rerun what
+  failed. Also to refresh a profile before a
   long task. Works for any profile and SSO portal — nothing account-specific. Triggers: "re-auth
   AWS", "AWS SSO login", "refresh aws credentials", "aws token expired", "SSO expired".
 ---
@@ -37,15 +38,16 @@ Check a session without re-authenticating:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/sso-auth.py" status [profile]
 ```
 
-Relay the printed autofill URL + code to the user. Once they approve in a browser, re-run the
-original command — the SSO token is then cached.
+The user does not see tool output. **Write the autofill URL and the code in your reply to them, word
+for word, before anything else** — a login whose link stayed in the tool output is a login nobody can
+approve. Once they approve in a browser, re-run the original command — the SSO token is then cached.
 
 ## Automatic (hook)
 
 The bundled PreToolUse hook (scoped to `aws *`) checks the target profile's SSO token **locally**
 before the command runs. If expired or missing, it starts the device-code login, captures the
-autofill URL + code, and blocks the command with that prompt instead of letting it fail. Relay the
-prompt; after approval, re-run the command.
+autofill URL + code, and blocks the command with that prompt instead of letting it fail. Write its link and code in your
+reply to the user; after approval, re-run the command.
 
 ## Notes
 
