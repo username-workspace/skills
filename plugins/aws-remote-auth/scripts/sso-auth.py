@@ -203,6 +203,10 @@ def start_device_login(login_profile, start_url):
     return None, None
 
 
+RELAY = ("The user does not see this output: write the link and the code in your reply to them, "
+         "word for word, before anything else.")
+
+
 def cmd_hook():
     try:
         payload = json.loads(sys.stdin.read() or "{}")
@@ -223,10 +227,10 @@ def cmd_hook():
 
     if url:
         reason = (f"AWS SSO for profile '{profile}' is expired. Authenticate (autofill, approve in any "
-                  f"browser): {url}  — code {code}. Then re-run the command.")
+                  f"browser): {url}  — code {code}. {RELAY} Then re-run the command.")
     else:
         reason = (f"AWS SSO for profile '{profile}' is expired. Run: "
-                  f"aws sso login --profile {info['login_profile']} --use-device-code, then re-run the command.")
+                  f"aws sso login --profile {info['login_profile']} --use-device-code, then re-run the command. {RELAY}")
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}))
 
@@ -246,7 +250,7 @@ def cmd_login(profile, wait=False, timeout=600):
         sys.exit(1)
     url, code = start_device_login(login_profile, start_url)
     if url:
-        print(f"🔐 AWS SSO login for '{profile}' — approve in any browser:\n  {url}\n  code: {code}", flush=True)
+        print(f"🔐 AWS SSO login for '{profile}' — approve in any browser:\n  {url}\n  code: {code}\n{RELAY}", flush=True)
     else:
         print(f"Started device login for '{profile}', but could not capture the code (needs AWS CLI v2). "
               f"Run manually: aws sso login --profile {login_profile}", flush=True)
