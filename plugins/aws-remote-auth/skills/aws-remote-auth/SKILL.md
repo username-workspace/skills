@@ -2,10 +2,13 @@
 name: aws-remote-auth
 description: >-
   Re-authenticate to AWS SSO on demand using a device code (autofill link) approved from any
-  browser. Use when an AWS SSO session is expired or missing, when an aws/terraform command fails
-  with "token has expired" or "SSO session ... expired", or to proactively refresh a profile before
-  a long task. Works for any profile and SSO portal — nothing account-specific. Triggers: "re-auth
-  AWS", "AWS SSO login", "refresh aws credentials", "aws token expired".
+  browser. Use when an AWS SSO session is expired or missing: an aws/terraform command fails with
+  "token has expired" or "SSO session ... expired"; kubectl against an EKS cluster fails to get a
+  token, answers "You must be logged in to the server", or a script reports kubectl unreachable;
+  an Athena or SDK call fails on credentials; or any tool output says to run `aws sso login`. Run it
+  instead of asking the user to log in, then rerun what failed. Also to refresh a profile before a
+  long task. Works for any profile and SSO portal — nothing account-specific. Triggers: "re-auth
+  AWS", "AWS SSO login", "refresh aws credentials", "aws token expired", "SSO expired".
 ---
 
 # AWS Remote Auth

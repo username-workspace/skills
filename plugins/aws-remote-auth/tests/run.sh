@@ -286,6 +286,12 @@ assert_contains 'usage: sso-auth.py' "$out" "19a. unknown subcommand → usage"
 assert_eq 2 "$rc" "19b. unknown subcommand → exit 2"
 python3 "$SSO" >/dev/null 2>&1; assert_eq 2 "$?" "19c. no subcommand → exit 2"
 
+# --- 20. the skill invokes itself on every surface an expired SSO session breaks, not only `aws` ---
+DESC="$(python3 -c "import sys; print(open(sys.argv[1]).read().split('---')[1])" "$(dirname "$SSO")/../skills/aws-remote-auth/SKILL.md")"
+for signal in kubectl EKS 'aws sso login' 'token has expired'; do
+  assert_contains "$signal" "$DESC" "20. description triggers on: $signal"
+done
+
 echo
 echo "PASS=$PASS FAIL=$FAIL"
 rm -rf "$ROOT"
