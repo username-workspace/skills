@@ -1,6 +1,6 @@
 ---
 name: claude-remote-spawn
-description: Spawn a VISIBLE Claude Code session you can drive from your terminal, phone or desktop (Remote Control). By default `spawn` opens it in a NEW terminal tab where you launched it (tmux, iTerm2, Terminal.app, WezTerm, kitty, Konsole, GNOME Terminal, else x-terminal-emulator) running `claude --remote-control <name>`; with no scriptable terminal it falls back to detached. `spawn --detach` runs it PERSISTENT inside a PTY instead, alive until you stop it. Cross-platform (macOS + Linux), no dependency. Use when asked to spawn a remote-controllable Claude session, launch a persistent agent you can steer from your phone, keep a Claude session running detached from your terminal, open a child session in a visible local terminal tab, or resume/respawn an existing session remotely from its id (or from a description, by composing with the find-session skill). Subcommands via driver.sh — spawn / open / resume / list / stop / check.
+description: Spawn a VISIBLE Claude Code session you can drive from your terminal, phone or desktop (Remote Control). By default `spawn` opens it in a NEW terminal tab where you launched it (tmux, iTerm2, Terminal.app, Warp, WezTerm, kitty, Konsole, GNOME Terminal, else x-terminal-emulator) running `claude --remote-control <name>`; with no scriptable terminal it falls back to detached. `spawn --detach` runs it PERSISTENT inside a PTY instead, alive until you stop it. Cross-platform (macOS + Linux), no dependency. Use when asked to spawn a remote-controllable Claude session, launch a persistent agent you can steer from your phone, keep a Claude session running detached from your terminal, open a child session in a visible local terminal tab, or resume/respawn an existing session remotely from its id (or from a description, by composing with the find-session skill). Subcommands via driver.sh — spawn / open / resume / list / stop / check.
 ---
 
 # claude-remote-spawn
@@ -73,7 +73,9 @@ skill — not only from your phone:
   <name>` directly in it. Detection, first match wins: **tmux** (`$TMUX` → new window), **WezTerm**
   (`wezterm cli spawn`), **kitty** (`kitty @ launch --type=tab`, needs `allow_remote_control`),
   **Konsole** (`--new-tab`), **GNOME Terminal** (`--tab`), **iTerm2** / **Terminal.app**
-  (`osascript`), else **`x-terminal-emulator`** (new window) when a display is present.
+  (`osascript`), **Warp** on macOS (a one-shot Tab Config in `~/.warp/tab_configs/`, opened by
+  `warp://tab_config/…` and deleted by its own tab), else **`x-terminal-emulator`** (new window) when
+  a display is present.
 - While the tab is open the session is a normal Remote-Control session too (shows up in `claude
   agents`, drivable from the phone). It also appears in `list` (marked `window`) and `stop` works.
 - **It is ephemeral by design.** There is no detach engine (no tmux/screen), so the session's life is
