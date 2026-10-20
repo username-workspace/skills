@@ -648,6 +648,19 @@ rm -f "$ROOT/bin/tmux" "$ROOT/bin/gnome-terminal" "$ROOT/bin/konsole"
 out=$(open_run_rc open --detach); rc="${out##*$'\n'}"
 assert_eq 1 "$rc" "57. open --detach → exit 1 (unknown flag)"
 
+# 58. Warp has no AppleScript: a Tab Config opened by URI runs the launcher in a tab of the active window
+printf '#!/usr/bin/env bash\necho "open $*" >> "%s"\n' "$ROOT/term.cap" > "$ROOT/bin/open"; chmod +x "$ROOT/bin/open"
+OS="$ROOT/os"; mkdir -p "$OS"; printf '#!/usr/bin/env bash\necho "${FAKE_OS:-Darwin}"\n' > "$OS/uname"; chmod +x "$OS/uname"
+: > "$ROOT/term.cap"; tc="$HOME/.warp/tab_configs/crs-inwarp.toml"
+out=$(TP=WarpTerminal PATH="$OS:$PATH" open_run open inwarp)
+assert_contains "open warp://tab_config/crs-inwarp" "$(cat "$ROOT/term.cap")" "58. open (Warp) → opens its Tab Config by URI"
+assert_contains "\"exec $STATE/inwarp.cmd\"" "$(cat "$tc" 2>/dev/null)" "58. Warp tab execs the launcher, so the tab ends with the session"
+assert_contains "\"rm -f $tc\"" "$(cat "$tc" 2>/dev/null)" "58. Warp Tab Config deletes itself once its tab runs"
+run stop inwarp >/dev/null 2>&1 || true
+out=$(FAKE_OS=Linux TP=WarpTerminal PATH="$OS:$PATH" open_run open linwarp)
+assert_contains "isn't auto-openable" "$out" "58. Warp off macOS → not auto-openable (Tab Configs live elsewhere)"
+rm -f "$ROOT/bin/open"
+
 echo
 echo "PASS=$PASS FAIL=$FAIL"
 rm -rf "$ROOT"

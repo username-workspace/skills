@@ -165,9 +165,9 @@ nato_name(){
   echo "claude-$(date +%H%M%S)"
 }
 
-# osascript wants the launcher path as an AppleScript string literal — escape \ and " (default paths are
-# clean, but CRS_HEADLESS_STATE could carry either).
-osa_escape(){ printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+# AppleScript and TOML both want the launcher path as a "…" string literal — escape \ and " (default
+# paths are clean, but CRS_HEADLESS_STATE could carry either).
+dq_escape(){ printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
 # Open `launcher` in a NEW tab of the terminal that launched the skill. Returns 2 for a terminal we can't
 # script, 3 when osascript is absent — the caller then falls back or tells the user to run the launcher.
@@ -184,9 +184,9 @@ open_terminal_tab(){
       osascript >/dev/null 2>&1 <<OSA
 tell application "iTerm"
   if (count of windows) = 0 then
-    create window with default profile command "$(osa_escape "$launcher")"
+    create window with default profile command "$(dq_escape "$launcher")"
   else
-    tell current window to create tab with default profile command "$(osa_escape "$launcher")"
+    tell current window to create tab with default profile command "$(dq_escape "$launcher")"
   end if
   activate
 end tell
@@ -197,10 +197,19 @@ OSA
       osascript >/dev/null 2>&1 <<OSA
 tell application "Terminal"
   activate
-  do script "$(osa_escape "exec $q")"
+  do script "$(dq_escape "exec $q")"
 end tell
 OSA
       ;;
+    WarpTerminal)
+      # Warp reads the Tab Config when it opens the tab, so the tab's first command can delete it.
+      [ "$(uname -s)" = Darwin ] || return 2
+      local session; session="$(basename "$launcher" .cmd)"
+      local tab_config="$HOME/.warp/tab_configs/crs-$session.toml"
+      mkdir -p "${tab_config%/*}"
+      printf 'name = "crs-%s"\ntitle = "%s"\n\n[[panes]]\nid = "claude"\ntype = "terminal"\ncommands = ["%s", "%s"]\n' \
+        "$session" "$session" "$(dq_escape "rm -f $(printf '%q' "$tab_config")")" "$(dq_escape "exec $q")" >"$tab_config"
+      open "warp://tab_config/crs-$session" ;;
     *)
       { [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v x-terminal-emulator >/dev/null 2>&1; } || return 2
       (x-terminal-emulator -e "$launcher" >/dev/null 2>&1 &) ;;
@@ -251,7 +260,7 @@ session stays visible & drivable from your phone/desktop. --model takes any valu
 alias like opus/sonnet/fable, or a full id like claude-fable-5); it is passed straight to
 'claude --model' and validated there — nothing is hardcoded. To resume from a description, get the id
 with find-session, then 'resume <id>'. A tab session (spawn/open) runs in a real LOCAL terminal tab
-(tmux, iTerm, Terminal.app, WezTerm, kitty, Konsole, GNOME Terminal, else x-terminal-emulator) with
+(tmux, iTerm, Terminal.app, Warp, WezTerm, kitty, Konsole, GNOME Terminal, else x-terminal-emulator) with
 no detach engine — visible & interactive where you launched it, but closing the tab ends it.
 cwd defaults to \$PWD (override CRS_SPAWN_CWD); its workspace trust is pre-approved in the claude
 config (CRS_CLAUDE_CONFIG, default ~/.claude.json) so the session never parks invisible on the dialog.
@@ -415,7 +424,7 @@ case "$cmd" in
     echo "perms  : $PERM"
     mh="$({ "$CLAUDE" --help 2>/dev/null | grep -aA3 -- '--model <model>' | tr '\n' ' ' | tr -s ' ' | sed 's/.*--model <model> *//'; } 2>/dev/null || true)"
     echo "model  : 'spawn --model <alias|id>' — passed to 'claude --model', validated there. ${mh:-run 'claude --help' for current aliases}"
-    echo "term   : TERM_PROGRAM=${TERM_PROGRAM:-<unset>}${TMUX:+ (in tmux)} — spawn/open open a tab in tmux, iTerm, Terminal.app, WezTerm, kitty, Konsole, GNOME Terminal or x-terminal-emulator; elsewhere spawn detaches"
+    echo "term   : TERM_PROGRAM=${TERM_PROGRAM:-<unset>}${TMUX:+ (in tmux)} — spawn/open open a tab in tmux, iTerm, Terminal.app, Warp (macOS), WezTerm, kitty, Konsole, GNOME Terminal or x-terminal-emulator; elsewhere spawn detaches"
     if grep -q '"remoteControlAtStartup": *true' "$HOME/.claude/settings.json" 2>/dev/null; then
       echo "remote : remoteControlAtStartup=true (every session is Remote-Control-visible)"
     else
