@@ -35,7 +35,8 @@ SSO_CACHE = Path.home() / ".aws" / "sso" / "cache"
 PENDING_DIR = Path.home() / ".aws" / "sso" / "remote-auth-pending"
 PENDING_TTL = 9 * 60
 SKEW = 60
-AUTOFILL_RE = re.compile(r"(https?://\S*[?&]user_code=([A-Za-z0-9-]+))")
+AUTOFILL_RE = re.compile(r"autofill the code upon loading:\s*(https?://\S+)")
+CODE_RE = re.compile(r"enter the code:\s*(\S+)")
 
 
 def _config_path():
@@ -148,15 +149,19 @@ def _pending_path(start_url):
     return PENDING_DIR / f"{key}.json"
 
 
+def device_prompt(text):
+    url, code = AUTOFILL_RE.search(text), CODE_RE.search(text)
+    return (url.group(1), code.group(1)) if url and code else (None, None)
+
+
 def _scan_log(log_path, pending):
     try:
         text = Path(log_path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None, None
-    m = AUTOFILL_RE.search(text)
-    if not m:
+    url, code = device_prompt(text)
+    if not url:
         return None, None
-    url, code = m.group(1), m.group(2)
     pending.write_text(json.dumps({"url": url, "code": code}), encoding="utf-8")
     return url, code
 
@@ -252,7 +257,7 @@ def cmd_login(profile, wait=False, timeout=600):
     if url:
         print(f"🔐 AWS SSO login for '{profile}' — approve in any browser:\n  {url}\n  code: {code}\n{RELAY}", flush=True)
     else:
-        print(f"Started device login for '{profile}', but could not capture the code (needs AWS CLI v2). "
+        print(f"Started device login for '{profile}', but could not read the code from its prompt. "
               f"Run manually: aws sso login --profile {login_profile}", flush=True)
     if not wait:
         print("Once approved, re-run your command.")
