@@ -48,16 +48,17 @@ source_profile = cycb
 source_profile = cyca
 EOF
 
-# --- stub aws on PATH: emits a device-code autofill URL, counts `sso login` invocations ---
+# --- stub aws on PATH: prints the device-code prompt of `aws sso login --no-browser`, counts invocations ---
 BIN="$ROOT/bin"; mkdir -p "$BIN"
 AWS_CALLS="$ROOT/aws-sso-login.log"; : > "$AWS_CALLS"
 cat > "$BIN/aws" <<EOF
 #!/usr/bin/env bash
 if [ "\$1 \$2" = "sso login" ]; then
   echo "\$@" >> "$AWS_CALLS"
-  echo "Attempting to automatically open the SSO authorization page in your default browser."
-  echo "If the browser does not open, open this URL:"
-  echo "https://device.sso.eu-west-1.amazonaws.com/?user_code=WXYZ-7788"
+  printf '%s\n' "Browser will not be automatically opened." "Please visit the following URL:" "" \
+    "https://device.sso.eu-west-1.amazonaws.com/" "" "Then enter the code:" "" "WXYZ-7788" "" \
+    "Alternatively, you may visit the following URL which will autofill the code upon loading:" \
+    "https://device.sso.eu-west-1.amazonaws.com/?user_code=WXYZ-7788"
 fi
 exit 0
 EOF
@@ -181,7 +182,7 @@ out=$(hook '{"tool_input":{"command":"aws s3 ls --profile dev"}}')
 echo "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin)["hookSpecificOutput"]; assert d["hookEventName"]=="PreToolUse"; assert d["permissionDecision"]=="deny"; assert d["permissionDecisionReason"]' \
   && ok "16. deny payload is valid PreToolUse JSON" || ko "16. deny payload is valid PreToolUse JSON"
 
-# 17. unit: resolver + autofill regex + pending key (driven through the module directly)
+# 17. unit: resolver + device prompt + pending key (driven through the module directly)
 cat > "$ROOT/unit.py" <<'PY'
 import importlib.util, os, hashlib
 spec = importlib.util.spec_from_file_location("sso", os.environ["SSO"])
@@ -206,9 +207,11 @@ check(m.resolve_sso("ghost") is None, "resolve_sso: unknown profile → None")
 check(m.resolve_sso("cyca") is None, "resolve_sso: source_profile cycle → None (no infinite loop)")
 
 u = "https://device.sso.us-east-1.amazonaws.com/?user_code=ABCD-1234"
-g = m.AUTOFILL_RE.search("see " + u + " now")
-check(g and g.group(1) == u and g.group(2) == "ABCD-1234", "AUTOFILL_RE: extracts full URL + code")
-check(m.AUTOFILL_RE.search("https://x/?foo=bar") is None, "AUTOFILL_RE: no user_code → no match")
+prompt = ("Then enter the code:\n\nABCD-1234\n\n"
+          "Alternatively, you may visit the following URL which will autofill the code upon loading:\n" + u + "\n")
+check(m.device_prompt(prompt) == (u, "ABCD-1234"), "device_prompt: autofill link + code of the prompt")
+check(m.device_prompt("Please visit the following URL:\n\nhttps://x/?user_code=ABCD-1234\n") == (None, None),
+      "device_prompt: no prompt → nothing captured")
 
 start = "https://my.awsapps.com/start"
 expect = hashlib.sha256(start.encode()).hexdigest()[:16] + ".json"
@@ -262,7 +265,9 @@ cat > "$SLOWBIN/aws" <<EOF
 if [ "\$1 \$2" = "sso login" ]; then
   echo "\$@" >> "$SLOW_CALLS"
   sleep 2
-  echo "https://device.sso.eu-west-1.amazonaws.com/?user_code=SLOW-9999"
+  printf '%s\n' "Then enter the code:" "" "SLOW-9999" "" \
+    "Alternatively, you may visit the following URL which will autofill the code upon loading:" \
+    "https://device.sso.eu-west-1.amazonaws.com/?user_code=SLOW-9999"
 fi
 exit 0
 EOF
@@ -300,6 +305,28 @@ clear_pending; clear_cache; seed_token "https://my.awsapps.com/start" "$(now_plu
 out=$(python3 "$SSO" login dev 2>&1)
 assert_contains 'user_code=WXYZ-7788' "$out" "23b. login prints the autofill link"
 assert_contains 'write the link and the code in your reply' "$out" "23c. login tells the model to relay the link"
+
+# --- 24. the sign-in flow of AWS CLI 2.31 carries the code outside the URL: the code and the autofill
+# link are read from the prompt the CLI prints, whatever the URL carries ---
+SIGNINBIN="$ROOT/signinbin"; mkdir -p "$SIGNINBIN"
+SIGNIN_URL='https://eu-west-1.signin.aws/platform/authorize?request_uri=urn%3Aietf%3Aparams%3Aoauth%3Arequest_uri%3ATEST&identitystore_id=d-0000000000'
+cat > "$SIGNINBIN/aws" <<EOF
+#!/usr/bin/env bash
+if [ "\$1 \$2" = "sso login" ]; then
+  printf '%s\n' "Browser will not be automatically opened." "Please visit the following URL:" "" "$SIGNIN_URL" "" \
+    "Then enter the code:" "" "NEWF-1234" "" \
+    "Alternatively, you may visit the following URL which will autofill the code upon loading:" "$SIGNIN_URL"
+fi
+exit 0
+EOF
+chmod +x "$SIGNINBIN/aws"
+clear_pending; clear_cache; seed_token "https://my.awsapps.com/start" "$(now_plus -3600)"
+out=$(env PATH="$SIGNINBIN:$REAL" python3 "$SSO" login dev 2>&1)
+assert_contains "$SIGNIN_URL" "$out" "24a. login prints the sign-in autofill link"
+assert_contains 'code: NEWF-1234' "$out" "24b. login prints the code the CLI prompts for"
+clear_pending; clear_cache; seed_token "https://my.awsapps.com/start" "$(now_plus -3600)"
+out=$(printf '%s' '{"tool_input":{"command":"aws s3 ls --profile dev"}}' | env PATH="$SIGNINBIN:$REAL" python3 "$SSO" hook 2>&1)
+assert_contains "code NEWF-1234" "$out" "24c. hook reason carries the code of the sign-in flow"
 
 echo
 echo "PASS=$PASS FAIL=$FAIL"
