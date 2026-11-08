@@ -1,6 +1,6 @@
 ---
 name: warp-session-restore
-description: Restart the Claude Code sessions running in Warp exactly as they were, after a shutdown, a reboot or a Warp restart — the same windows, tab groups (name, color, collapsed, pinned), tab colors and pane splits, each Claude pane resuming its own session in place. A hook snapshots Warp's layout with the session of each pane on every session start and turn end; restore reopens it as a Warp launch configuration. Use when the user wants to reboot or quit Warp without losing their sessions, says they rebooted and wants their Warp sessions back, asks to restore, reopen or relaunch the sessions or tabs that were running in Warp, asks what a restore would bring back, or asks whether Warp's Claude Code integration is set up.
+description: Restart the Claude Code sessions running in Warp exactly as they were, after a shutdown, a reboot or a Warp restart — the same windows, tab groups (name, color, collapsed, pinned), tab colors and pane splits, each Claude pane resuming its own session in place. A hook snapshots Warp's layout with the session of each pane on every session start and turn end; restore reopens it in the running Warp's window, or as a launch configuration that starts Warp. Use when the user wants to reboot or quit Warp without losing their sessions, says they rebooted and wants their Warp sessions back, asks to restore, reopen or relaunch the sessions or tabs that were running in Warp, asks what a restore would bring back, or asks whether Warp's Claude Code integration is set up.
 allowed-tools: Bash
 ---
 
@@ -26,19 +26,28 @@ the sessions alive at the last turn before the shutdown. `snapshot` takes one by
 
     python3 scripts/warp_session_restore.py restore [--dry-run] [--current | --from FILE] [name...]
 
-It reads the newest snapshot taken **before the current boot**, writes it as the launch configuration
-`warp-session-restore` (`~/.warp/launch_configurations/warp-session-restore.yaml`), and opens it with
-`warp://launch/warp-session-restore.yaml`: a new Warp window per snapshot window, groups and splits as they
-were, each Claude pane running `claude --resume <id> -n <name> <flags>` in place — the same transcript
-and the same Remote Control entry. A pane whose session is already running, or whose folder is gone,
-opens a shell instead, and the report says so.
+It reads the newest snapshot taken **before the current boot** and reopens it in the Warp that is there:
 
-It then waits until every resumed session runs again. When one does not (a locked screen, Warp not
-running), it says which and how to open the configuration by hand: Warp, File > Launch Configurations >
+- **Warp running** — each tab holding a session to resume opens in Warp's active window, from a Tab
+  Config (`~/.warp/tab_configs/warp-session-restore-<n>.toml`, opened with
+  `warp://tab_config/warp-session-restore-<n>`, deleted by the tab's first command): its title, color and
+  pane splits as they were. Tab Configs hold no tab group, and a tab with nothing to resume stays closed.
+- **Warp not running**, or `--window` — the launch configuration `warp-session-restore`
+  (`~/.warp/launch_configurations/warp-session-restore.yaml`, opened with
+  `warp://launch/warp-session-restore.yaml`) starts it: a new window per snapshot window, tab groups and
+  splits as they were.
+
+Each Claude pane runs `claude --resume <id> -n <name> <flags>` in place — the same transcript and the same
+Remote Control entry. A pane whose session is already running, or whose folder is gone, opens a shell
+instead, and the report says so.
+
+It then waits until every resumed session runs again. When one does not (a locked screen), it says which
+and how to open it by hand: the tab from Warp's + menu, or File > Launch Configurations >
 `warp-session-restore`.
 
 - `name...` — only the tabs holding those sessions (by name or id).
-- `--dry-run` — print the report and the configuration, open nothing.
+- `--dry-run` — print the report and the configurations, open nothing.
+- `--window` — a new window even when Warp is running, tab groups included.
 - `--current` — this boot's snapshot (sessions lost to a Warp crash, before any other turn ends);
   `--from FILE` a given one.
 - `show` prints the snapshot a restore would use, with the same `--current` / `--from`.
@@ -59,6 +68,6 @@ Warp's own agents, never a Claude Code session.
 ## Env
 
 - `WS_SNAPSHOT=0` — the hook takes no snapshot.
-- `WS_WARP_DB`, `WS_LAUNCH_DIR`, `WS_SESSIONS_DIR`, `WS_SNAPSHOT_DIR` — override where Warp's database,
-  the launch configurations, Claude Code's session registry and the snapshots are.
+- `WS_WARP_DB`, `WS_LAUNCH_DIR`, `WS_TAB_DIR`, `WS_SESSIONS_DIR`, `WS_SNAPSHOT_DIR` — override where Warp's database,
+  the launch configurations, the Tab Configs, Claude Code's session registry and the snapshots are.
 - `WS_OPEN_WAIT` — seconds restore waits for the resumed sessions (default 30).

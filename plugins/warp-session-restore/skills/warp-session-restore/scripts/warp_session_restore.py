@@ -4,8 +4,9 @@
 snapshot  one file per boot: Warp's windows, tab groups, tabs and pane splits, read from Warp's own
           state database, with the live Claude Code session of each pane matched by its pane uuid.
 show      print the snapshot a restore would use.
-restore   write that snapshot as a Warp launch configuration, each Claude pane resuming its session
-          in place, open it, and wait until each of those sessions runs again.
+restore   reopen that snapshot, each Claude pane resuming its session in place: in the window of the
+          Warp already running as one Tab Config per tab, else as a launch configuration that starts
+          Warp with its windows and tab groups; then wait until each of those sessions runs again.
 check     what the machine offers: Warp's database, the launch configurations folder, Warp's plugin
           for Claude Code notifications.
 """
@@ -28,6 +29,8 @@ DEFAULT_LAUNCH = (HOME + "/.warp/launch_configurations" if MAC
                   else os.environ.get("XDG_DATA_HOME", HOME + "/.local/share") + "/warp-terminal/launch_configurations")
 WARP_DB = os.environ.get("WS_WARP_DB", DEFAULT_DB)
 LAUNCH_DIR = os.environ.get("WS_LAUNCH_DIR", DEFAULT_LAUNCH)
+TAB_DIR = os.environ.get("WS_TAB_DIR", HOME + "/.warp/tab_configs" if MAC
+                         else os.environ.get("XDG_DATA_HOME", HOME + "/.local/share") + "/warp-terminal/tab_configs")
 SESSIONS_DIR = os.environ.get("WS_SESSIONS_DIR", HOME + "/.claude/sessions")
 SNAP_DIR = os.environ.get("WS_SNAPSHOT_DIR", HOME + "/.claude/warp-snapshots")
 CONFIG_NAME = "warp-session-restore"
@@ -258,6 +261,60 @@ def q(value):
     return json.dumps(value, ensure_ascii=False)
 
 
+def warp_running():
+    marker = "/Warp.app/Contents/MacOS/" if MAC else "warp-terminal"
+    out = subprocess.run(["ps", "-axo", "comm="], capture_output=True, text=True).stdout
+    return any(marker in line for line in out.splitlines())
+
+
+def leaf_plan(node, live_ids, report, resumed):
+    c = node.get("claude")
+    cwd = (c["cwd"] if c else node["cwd"]) or HOME
+    if c and c["sessionId"] in live_ids:
+        report.append("= %s: already running, its pane opens a shell (%s)" % (c["name"] or c["sessionId"], c["sessionId"]))
+    elif c and not os.path.isdir(c["cwd"]):
+        report.append("! %s: %s no longer exists, its pane opens a shell (%s)" % (c["name"] or c["sessionId"], c["cwd"], c["sessionId"]))
+        cwd = HOME
+    elif c:
+        argv = ["claude", "--resume", c["sessionId"]] + (["-n", c["name"]] if c["name"] else []) + c["flags"]
+        report.append("+ %s: resumes %s in %s" % (c["name"] or c["sessionId"], c["sessionId"], c["cwd"]))
+        resumed.append(c["sessionId"])
+        return cwd, " ".join(shlex.quote(a) for a in argv)
+    return cwd, None
+
+
+def tab_title(tab):
+    claude = [leaf["claude"] for leaf in leaves(tab["layout"]) if leaf.get("claude")]
+    return tab["title"] or (claude[0]["name"] if claude and claude[0]["name"] else "")
+
+
+def tab_toml(tab, name, path, live_ids, report, resumed):
+    panes = []
+
+    def walk(node):
+        entry = {"id": "p%d" % len(panes)}
+        panes.append(entry)
+        if "panes" in node:
+            entry["split"] = node["split"]
+            entry["children"] = [walk(p) for p in node["panes"]]
+        else:
+            cwd, command = leaf_plan(node, live_ids, report, resumed)
+            entry.update({"type": "terminal", "directory": cwd, "commands": [command] if command else []})
+            if node.get("focused"):
+                entry["is_focused"] = True
+        return entry["id"]
+
+    walk(tab["layout"])
+    first = next(e for e in panes if "type" in e)
+    first["commands"].insert(0, "rm -f " + shlex.quote(path))
+    lines = ["name = %s" % q(name), "title = %s" % q(tab_title(tab))]
+    if tab.get("color"):
+        lines.append("color = %s" % q(tab["color"]))
+    for e in panes:
+        lines += ["", "[[panes]]"] + ["%s = %s" % (k, json.dumps(v, ensure_ascii=False)) for k, v in e.items()]
+    return "\n".join(lines) + "\n"
+
+
 def pane_yaml(node, pad, live_ids, report, resumed):
     lines = []
     if "panes" in node:
@@ -268,21 +325,12 @@ def pane_yaml(node, pad, live_ids, report, resumed):
             lines.append(pad + "  - " + sub[0].lstrip())
             lines += sub[1:]
         return lines
-    c = node.get("claude")
-    cwd = (c["cwd"] if c else node["cwd"]) or HOME
+    cwd, command = leaf_plan(node, live_ids, report, resumed)
     lines.append("%scwd: %s" % (pad, q(cwd)))
     if node.get("focused"):
         lines.append("%sis_focused: true" % pad)
-    if c and c["sessionId"] in live_ids:
-        report.append("= %s: already running, its pane opens a shell (%s)" % (c["name"] or c["sessionId"], c["sessionId"]))
-    elif c and not os.path.isdir(c["cwd"]):
-        report.append("! %s: %s no longer exists, its pane opens a shell (%s)" % (c["name"] or c["sessionId"], c["cwd"], c["sessionId"]))
-        lines[-1] = "%scwd: %s" % (pad, q(HOME))
-    elif c:
-        argv = ["claude", "--resume", c["sessionId"]] + (["-n", c["name"]] if c["name"] else []) + c["flags"]
-        lines += ["%scommands:" % pad, "%s  - exec: %s" % (pad, q(" ".join(shlex.quote(a) for a in argv)))]
-        report.append("+ %s: resumes %s in %s" % (c["name"] or c["sessionId"], c["sessionId"], c["cwd"]))
-        resumed.append(c["sessionId"])
+    if command:
+        lines += ["%scommands:" % pad, "%s  - exec: %s" % (pad, q(command))]
     return lines
 
 
@@ -323,9 +371,7 @@ def launch_yaml(snap, live_ids, report, resumed, names):
                 lines += ["        collapsed: %s" % str(g["collapsed"]).lower(), "        pinned: %s" % str(g["pinned"]).lower()]
         lines.append("    tabs:")
         for _, t in tabs:
-            claude = [leaf["claude"] for leaf in leaves(t["layout"]) if leaf.get("claude")]
-            title = t["title"] or (claude[0]["name"] if claude and claude[0]["name"] else "")
-            lines.append("      - title: %s" % q(title))
+            lines.append("      - title: %s" % q(tab_title(t)))
             if t.get("color"):
                 lines.append("        color: %s" % t["color"])
             if t.get("group"):
@@ -343,21 +389,42 @@ def restore(args):
     names = {a for i, a in enumerate(args) if not a.startswith("--") and (i == 0 or args[i - 1] != "--from")}
     if not any(wanted(t, names) for w in snap["windows"] for t in w["tabs"]):
         raise SystemExit("no tab of %s holds a session named %s" % (path, ", ".join(sorted(names))))
-    body = launch_yaml(snap, live_ids, report, resumed, names)
+    in_window = "--window" not in args and warp_running()
+    files = []
+    if in_window:
+        for t in [t for w in snap["windows"] for t in w["tabs"] if wanted(t, names)]:
+            name = "%s-%d" % (CONFIG_NAME, len(files) + 1)
+            path_toml = os.path.join(TAB_DIR, name + ".toml")
+            tab_report, tab_resumed = [], []
+            body = tab_toml(t, name, path_toml, live_ids, tab_report, tab_resumed)
+            report += tab_report
+            if tab_resumed:
+                resumed += tab_resumed
+                files.append((name, path_toml, body))
+        if any(t.get("group") for w in snap["windows"] for t in w["tabs"] if wanted(t, names)):
+            report.append("~ tab groups come back only in a new window: restore --window")
+    else:
+        files.append((CONFIG_NAME + ".yaml", os.path.join(LAUNCH_DIR, CONFIG_NAME + ".yaml"),
+                      launch_yaml(snap, live_ids, report, resumed, names)))
     print("snapshot: %s" % path)
+    print("opens in: %s" % ("the Warp window already open, one tab per session tab" if in_window
+                            else "a new Warp window per snapshot window"))
     for line in report:
         print(line)
     for s in snap.get("outside", []):
         print("~ %s: ran outside Warp, not restored (%s)" % (s["name"] or s["sessionId"], s["sessionId"]))
     if "--dry-run" in args:
-        sys.stdout.write(body)
+        for _, _, body in files:
+            sys.stdout.write(body)
         return
-    os.makedirs(LAUNCH_DIR, exist_ok=True)
-    target = os.path.join(LAUNCH_DIR, CONFIG_NAME + ".yaml")
-    with open(target, "w") as f:
-        f.write(body)
     opener = os.environ.get("WS_OPEN", "open" if MAC else "xdg-open")
-    subprocess.run([opener, "warp://launch/" + quote(CONFIG_NAME + ".yaml")], check=False)
+    for n, (name, target, body) in enumerate(files):
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "w") as f:
+            f.write(body)
+        if n:
+            time.sleep(1)
+        subprocess.run([opener, ("warp://tab_config/" if in_window else "warp://launch/") + quote(name)], check=False)
     pending = set(resumed)
     deadline = time.time() + float(os.environ.get("WS_OPEN_WAIT", "30"))
     while pending and time.time() < deadline:
@@ -365,10 +432,12 @@ def restore(args):
         if pending:
             time.sleep(1)
     if pending:
-        print("! not back yet: %s — if Warp opened no window (locked screen, Warp not running), open it from Warp: "
-              "File > Launch Configurations > %s  (%s)" % (", ".join(sorted(pending)), CONFIG_NAME, target))
+        manual = ("its tab from Warp's + menu: %s" % ", ".join(n for n, p, _ in files if os.path.exists(p)) if in_window
+                  else "File > Launch Configurations > %s" % CONFIG_NAME)
+        print("! not back yet: %s — if Warp opened nothing (locked screen), open %s"
+              % (", ".join(sorted(pending)), manual))
         sys.exit(1)
-    print("restored: every Claude session is running again, from %s" % target)
+    print("restored: every Claude session is running again")
 
 
 def check():
@@ -399,7 +468,7 @@ def main():
         check()
     else:
         raise SystemExit("usage: warp_session_restore.py snapshot [--quiet] | show [--current|--from F] | "
-                         "restore [--dry-run] [--current|--from F] [name...] | check")
+                         "restore [--dry-run] [--window] [--current|--from F] [name...] | check")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 {
   "name": "warp-session-restore",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Restart your Claude Code sessions in Warp exactly as they were: a hook snapshots Warp's windows, tab groups (name, color, collapsed, pinned), tab colors and pane splits from Warp's own state, with the Claude session each pane runs; after a reboot, restore reopens that layout as a Warp launch configuration, each Claude pane resuming its session in place. macOS and Linux.",
   "author": {
     "name": "Username",

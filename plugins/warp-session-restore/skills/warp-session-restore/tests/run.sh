@@ -9,7 +9,7 @@ ROOT="$(mktemp -d)"
 export HOME="$ROOT/home"; mkdir -p "$HOME"
 DB="$ROOT/warp.sqlite"; REG="$ROOT/registry"; SNAPS="$ROOT/snaps"; LAUNCH="$ROOT/launch"
 mkdir -p "$REG" "$ROOT/proj/a" "$ROOT/proj/b" "$ROOT/bin"
-export WS_WARP_DB="$DB" WS_SESSIONS_DIR="$REG" WS_SNAPSHOT_DIR="$SNAPS" WS_LAUNCH_DIR="$LAUNCH"
+export WS_WARP_DB="$DB" WS_SESSIONS_DIR="$REG" WS_SNAPSHOT_DIR="$SNAPS" WS_LAUNCH_DIR="$LAUNCH" WS_TAB_DIR="$ROOT/tabs"
 unset WS_SNAPSHOT WS_BOOT_ID WS_OPEN WS_OPEN_WAIT
 ws(){ python3 "$WS" "$@" 2>&1; }
 
@@ -67,6 +67,7 @@ sleep 0.3
 mkdir -p "$ROOT/env"; printf '%s' "$UA" > "$ROOT/env/$PA"; printf '%s' "$UB" > "$ROOT/env/$PB"; printf '%s' "$UC" > "$ROOT/env/$PD"
 cat > "$ROOT/bin/ps" <<EOF
 #!/bin/sh
+case " \$* " in *" comm= "*) [ -n "\${STUB_WARP:-}" ] && echo "/Applications/Warp.app/Contents/MacOS/stable warp-terminal"; exit 0 ;; esac
 case " \$* " in *" -E "*) for p; do :; done; u="\$(cat "$ROOT/env/\$p" 2>/dev/null)"; echo "fakeclaude \${u:+WARP_TERMINAL_SESSION_UUID=\$u}"; exit 0 ;; esac
 exec /bin/ps "\$@"
 EOF
@@ -145,6 +146,29 @@ assert_contains "not back yet: aaaa-1111" "$out" "8. … naming it, with the man
 out=$(STUB_RESUMES=1 WS_OPEN="$ROOT/bin/opener" WS_OPEN_WAIT=5 WS_BOOT_ID=boot2 python3 "$WS" restore "Alpha Session" 2>&1); rc=$?
 assert_eq 0 "$rc" "8. every resumed session running again → exit 0"
 assert_contains "restored" "$out" "8. … and says so"
+
+rm -f "$ROOT/open.cap"
+for f in "$REG"/*.json; do grep -q aaaa-1111 "$f" && { kill "$(basename "$f" .json)" 2>/dev/null; rm -f "$f"; }; done
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["windows"][0]["tabs"][1]["layout"]["claude"]["cwd"]=sys.argv[2]; json.dump(d,open(sys.argv[1],"w"))' "$SNAPS/boot1.json" "$ROOT/proj/b"
+y=$(STUB_WARP=1 WS_BOOT_ID=boot2 ws restore --dry-run)
+assert_contains "opens in: the Warp window already open" "$y" "9. Warp running → restore opens in its window"
+assert_contains '[[panes]]' "$y" "9. … as Tab Configs"
+assert_absent 'tab_groups' "$y" "9. … which hold no tab group"
+assert_contains "restore --window" "$y" "9. … and says how to get the groups back"
+assert_contains 'split = "horizontal"' "$y" "9. a split keeps its direction"
+assert_contains '"rm -f '"$ROOT"'/tabs/warp-session-restore-1.toml", "claude --resume aaaa-1111 -n '"'"'Alpha Session'"'"' --remote-control alpha --permission-mode auto"' "$y" "9. the tab deletes its Tab Config, then resumes in place"
+assert_contains 'is_focused = true' "$y" "9. focused pane kept"
+assert_contains 'color = "magenta"' "$y" "9. tab color kept"
+reg $$ bbbb-2222 "$ROOT/proj/b" cli beta
+y=$(STUB_WARP=1 WS_BOOT_ID=boot2 ws restore --dry-run)
+assert_absent "warp-session-restore-2" "$y" "9. a tab with nothing to resume does not open in the running Warp"
+rm -f "$REG/$$.json"
+out=$(STUB_RESUMES=1 STUB_WARP=1 WS_OPEN="$ROOT/bin/opener" WS_OPEN_WAIT=5 WS_BOOT_ID=boot2 python3 "$WS" restore "Alpha Session" 2>&1); rc=$?
+assert_eq "warp://tab_config/warp-session-restore-1" "$(cat "$ROOT/open.cap" 2>/dev/null)" "10. opened by name into the active window, nothing else"
+assert_contains "--resume aaaa-1111" "$(cat "$ROOT/tabs/warp-session-restore-1.toml" 2>/dev/null)" "10. the Tab Config is written where Warp reads it"
+assert_eq 0 "$rc" "10. its session running again → exit 0"
+y=$(STUB_WARP=1 WS_BOOT_ID=boot2 ws restore --dry-run --window)
+assert_contains '- name: "work"' "$y" "11. --window opens a new window, groups included"
 
 kill "$PO" "$PD" 2>/dev/null
 for f in "$REG"/*.json; do p="$(basename "$f" .json)"; [ "$p" = 999999 ] || kill "$p" 2>/dev/null; done
