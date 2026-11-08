@@ -1,0 +1,15 @@
+{
+  "category": "Agents",
+  "tagline": "Reboot without losing your Claude Code sessions in Warp.",
+  "summary": "Warp reopens its windows after a restart, but not the agents that ran in them. warp-session-restore remembers which Claude Code session ran in which pane, and after a reboot reopens the same windows, tab groups, colors and splits with every session resumed where it was.",
+  "capabilities": [
+    "Snapshots Warp's layout from its own state database on every Claude Code turn end: windows, tab groups (name, color, collapsed, pinned), tab colors, nested pane splits, the focused pane",
+    "Matches each running Claude Code session to its Warp pane, with the launch flags worth replaying (remote control, permission mode, model, effort, extra dirs)",
+    "Restores the layout as a Warp launch configuration, each Claude pane running claude --resume in place: same session id, same Remote Control entry",
+    "Waits until every resumed session runs again, and says which did not",
+    "Restores only the tabs of the sessions you name, or previews the configuration with --dry-run",
+    "Checks that Warp's Claude Code plugin (agent notifications) is enabled"
+  ],
+  "commands": ["snapshot", "show", "restore", "check"],
+  "platforms": ["macOS", "Linux"]
+}
