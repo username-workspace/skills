@@ -10,8 +10,9 @@
     "Pick the model with --model (any alias or id your claude accepts — passed straight through, never hardcoded)",
     "Shows up in Remote Control and in \"claude agents\", drivable from your phone",
     "Stays alive until you stop it, unlike a headless run that exits immediately",
-    "Terminal-agnostic, no dependencies"
+    "Terminal-agnostic, no dependencies",
+    "Snapshots the sessions running on the machine on every turn end, and after a reboot restores each one in place (same id, same Remote Control entry, same folder and flags) in a new terminal tab, detached when no tab opens"
   ],
-  "commands": ["spawn", "open", "resume", "list", "stop", "check"],
+  "commands": ["spawn", "open", "resume", "list", "stop", "check", "snapshot", "restore"],
   "platforms": ["macOS", "Linux"]
 }

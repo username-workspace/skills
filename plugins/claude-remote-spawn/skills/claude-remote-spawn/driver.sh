@@ -10,6 +10,7 @@ set -euo pipefail
 CLAUDE_BIN="${CRS_CLAUDE_BIN:-$HOME/.local/bin/claude}"
 STATE_DIR="${CRS_HEADLESS_STATE:-$HOME/.claude/headless}"
 CLAUDE_CONFIG="${CRS_CLAUDE_CONFIG:-$HOME/.claude.json}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if   [ -n "${CRS_HEADLESS_PERM_FLAGS+set}" ]; then PERM="$CRS_HEADLESS_PERM_FLAGS"
 elif [ -n "${CRS_HEADLESS_DANGEROUS:-}" ];    then PERM="--dangerously-skip-permissions"
 else PERM="--permission-mode auto"; fi
@@ -209,7 +210,9 @@ OSA
       mkdir -p "${tab_config%/*}"
       printf 'name = "crs-%s"\ntitle = "%s"\n\n[[panes]]\nid = "claude"\ntype = "terminal"\ncommands = ["%s", "%s"]\n' \
         "$session" "$session" "$(dq_escape "rm -f $(printf '%q' "$tab_config")")" "$(dq_escape "exec $q")" >"$tab_config"
-      open "warp://tab_config/crs-$session" ;;
+      open "warp://tab_config/crs-$session"
+      local i; for i in $(seq 1 "${CRS_TAB_WAIT:-50}"); do [ -e "$tab_config" ] || return 0; sleep 0.1; done
+      rm -f "$tab_config"; return 4 ;;
     *)
       { [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v x-terminal-emulator >/dev/null 2>&1; } || return 2
       (x-terminal-emulator -e "$launcher" >/dev/null 2>&1 &) ;;
@@ -246,8 +249,28 @@ OSA
   esac
 }
 
+# Write the launcher a terminal tab runs, and the window session's state. %q makes the claude argv
+# injection-proof; $3 is a pre-split flag string (maybe empty) written raw so the tab's shell re-splits it.
+# NOT exec: 'stop' finds claude as the launcher's descendant. 'stop' closes the tab from outside once
+# the launcher is gone: closed from inside, it still runs a job and the terminal prompts.
+write_window_session(){
+  local name="$1" cwd="$2" raw="$3" launcher="$STATE_DIR/$1.cmd"; shift 3
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'cd %q || exit 1\n' "$cwd"
+    printf 'unset %s\n' "$PARENT_SESSION_ENV"
+    printf 'grep -qx mode=window %q 2>/dev/null && printf "launcher=%%s\\nleader_start=%%s\\nterm=%%s\\ntab=%%s\\n" "$$" "$(LC_ALL=C TZ=UTC0 ps -o lstart= -p $$)" "${TERM_PROGRAM:-}" "$(if [ "${TERM_PROGRAM:-}" = iTerm.app ]; then echo "${ITERM_SESSION_ID:-}"; else tty; fi)" >> %q\n' "$STATE_DIR/$name.spawn" "$STATE_DIR/$name.spawn"
+    printf '%q' "$CLAUDE"
+    printf ' %q' "$@"
+    printf ' %s\n' "$raw"
+  } >"$launcher"
+  chmod +x "$launcher"
+  printf 'name=%s\ncwd=%s\nstarted=%s\nmode=window\n' "$name" "$cwd" "$(date -u +%FT%TZ)" >"$STATE_DIR/$name.spawn"
+  echo "$launcher"
+}
+
 usage(){ cat >&2 <<EOF
-usage: driver.sh [open|spawn|resume|list|stop|check] [args]   (subcommand omitted → 'open')
+usage: driver.sh [open|spawn|resume|list|stop|check|snapshot|restore] [args]   (subcommand omitted → 'open')
   spawn [name] [--model M] [--prompt 'text'] [--detach]  launch a session in a NEW terminal tab (falls back to detached
                            when no tab can be opened); --detach = persistent PTY session that survives until 'stop'
   open  [name] [--model M] [--prompt 'text']  DEFAULT — like spawn, but tab-only: fails instead of detaching
@@ -255,6 +278,9 @@ usage: driver.sh [open|spawn|resume|list|stop|check] [args]   (subcommand omitte
   list                     list spawned sessions (live/dead)
   stop <name>              stop a session
   check                    health (claude, script, perms, models, remote-control, terminal, sessions)
+  snapshot                 record this machine's live Claude Code CLI sessions (one snapshot per boot)
+  restore [--dry-run] [--from FILE] [name...]  reopen, each in a new terminal tab and in place, the
+                           sessions of the last snapshot taken before this boot
 spawn --detach/resume run 'claude --remote-control <name> [--resume <id>]' in a PTY (script) so the
 session stays visible & drivable from your phone/desktop. --model takes any value your 'claude' accepts (an
 alias like opus/sonnet/fable, or a full id like claude-fable-5); it is passed straight to
@@ -273,7 +299,7 @@ exit 2; }
 # isn't a known subcommand/help flag (i.e. a session name or a flag), runs
 # 'open' with the original args preserved.
 case "${1:-}" in
-  spawn|open|resume|list|stop|check) cmd="$1"; shift ;;
+  spawn|open|resume|list|stop|check|snapshot|restore) cmd="$1"; shift ;;
   -h|--help)                                   cmd="$1"; shift ;;
   '')                                          cmd="open" ;;
   *)                                           die "unknown subcommand: $1 (see --help)" ;;
@@ -300,23 +326,9 @@ case "$cmd" in
     cwd="${CRS_SPAWN_CWD:-$PWD}"
     ensure_trusted "$cwd"
     if [ -z "$detach" ]; then
-      launcher="$STATE_DIR/$name.cmd"
-      # the launcher is what the terminal tab runs; %q makes the claude argv injection-proof. PERM is a
-      # pre-split flag string (maybe empty) — written raw on purpose so the tab's shell re-splits it.
-      # NOT exec: 'stop' finds claude as the launcher's descendant. 'stop' closes the tab from outside
-      # once the launcher is gone: closed from inside, it still runs a job and the terminal prompts.
-      {
-        printf '#!/usr/bin/env bash\n'
-        printf 'cd %q || exit 1\n' "$cwd"
-        printf 'unset %s\n' "$PARENT_SESSION_ENV"
-        printf 'grep -qx mode=window %q 2>/dev/null && printf "launcher=%%s\\nleader_start=%%s\\nterm=%%s\\ntab=%%s\\n" "$$" "$(LC_ALL=C TZ=UTC0 ps -o lstart= -p $$)" "${TERM_PROGRAM:-}" "$(if [ "${TERM_PROGRAM:-}" = iTerm.app ]; then echo "${ITERM_SESSION_ID:-}"; else tty; fi)" >> %q\n' "$STATE_DIR/$name.spawn" "$STATE_DIR/$name.spawn"
-        printf '%q --remote-control %q -n %q' "$CLAUDE" "$name" "$name"
-        [ -n "$model" ]  && printf ' --model %q' "$model"
-        [ -n "$prompt" ] && printf ' %q' "$prompt"
-        printf ' %s\n' "$PERM"
-      } >"$launcher"
-      chmod +x "$launcher"
-      printf 'name=%s\ncwd=%s\nstarted=%s\nmode=window\n' "$name" "$cwd" "$(date -u +%FT%TZ)" >"$STATE_DIR/$name.spawn"
+      model_args=(); [ -n "$model" ] && model_args=(--model "$model")
+      prompt_args=(); [ -n "$prompt" ] && prompt_args=("$prompt")
+      launcher="$(write_window_session "$name" "$cwd" "$PERM" --remote-control "$name" -n "$name" ${model_args[@]+"${model_args[@]}"} ${prompt_args[@]+"${prompt_args[@]}"})"
       [ -n "$model" ] && echo "model=$model" >>"$STATE_DIR/$name.spawn"
       rc=0; open_terminal_tab "$launcher" || rc=$?
       if [ "$rc" = 0 ]; then
@@ -329,6 +341,7 @@ case "$cmd" in
       case "$rc" in
         2) why="terminal '${TERM_PROGRAM:-unknown}' isn't auto-openable" ;;
         3) why="osascript not found" ;;
+        4) why="the terminal did not open the tab (locked screen, or the app not running)" ;;
         *) why="could not open a terminal tab (exit $rc)" ;;
       esac
       [ "$cmd" = open ] && die "open: $why — run it yourself in any terminal: $launcher"
@@ -451,6 +464,62 @@ case "$cmd" in
     fi
     shopt -s nullglob; spawns=("$STATE_DIR"/*.spawn)
     echo "spawns : ${#spawns[@]} session(s)"
+    ;;
+  snapshot)
+    command -v python3 >/dev/null 2>&1 || die "snapshot needs python3"
+    python3 "$HERE/sessions.py" snapshot "$@"
+    ;;
+  restore)
+    need_claude
+    command -v python3 >/dev/null 2>&1 || die "restore needs python3"
+    dry=""; from=""; only=" "
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --dry-run) dry=1; shift ;;
+        --from)    [ -n "${2:-}" ] || die "--from needs a snapshot file"; from="$2"; shift 2 ;;
+        --from=*)  from="${1#--from=}"; shift ;;
+        -*)        die "unknown flag: $1" ;;
+        *)         only="$only$(slugify "$1") "; shift ;;
+      esac
+    done
+    plan="$(python3 "$HERE/sessions.py" plan ${from:+"$from"})" || exit 1
+    opened=0
+    while IFS= read -r line; do
+      case "$line" in "# "*) echo "snapshot: ${line#\# }" >&2; continue ;; esac
+      IFS=$'\t' read -r -a f <<<"$line"
+      state="${f[0]}"; label="${f[1]}"; id="${f[2]}"; cwd="${f[3]}"; flags=("${f[@]:4}")
+      name="$(slugify "$label")"; [ -n "$name" ] || name="$(slugify "${id%%-*}")"
+      [ "$only" = " " ] || case "$only" in *" $name "*) ;; *) continue ;; esac
+      case "$state" in
+        live)  echo "= $label: already running ($id)" >&2; continue ;;
+        nocwd) echo "! $label: $cwd no longer exists, skipped ($id)" >&2; continue ;;
+      esac
+      if [ -n "$dry" ]; then echo "~ $label: would resume $id in $cwd ${flags[*]+${flags[*]}}" >&2; continue; fi
+      if [ -e "$STATE_DIR/$name.spawn" ] && session_alive "$name"; then name="$name-${id%%-*}"; fi
+      ensure_trusted "$cwd"
+      launcher="$(write_window_session "$name" "$cwd" "" --resume "$id" -n "$label" ${flags[@]+"${flags[@]}"})"
+      echo "resumed=$id" >>"$STATE_DIR/$name.spawn"
+      rc=0; open_terminal_tab "$launcher" || rc=$?
+      if [ "$rc" = 0 ]; then
+        opened=$((opened + 1)); echo "+ $label: resumed $id in a new tab ($cwd)" >&2
+      elif command -v script >/dev/null 2>&1; then
+        rm -f "$launcher"
+        detached=(); skip=""
+        for x in ${flags[@]+"${flags[@]}"}; do
+          if [ -n "$skip" ]; then skip=""; case "$x" in -*) ;; *) continue ;; esac; fi
+          [ "$x" = --remote-control ] && { skip=1; continue; }
+          detached+=("$x")
+        done
+        PERM="" launch_session "$name" "$cwd" --resume "$id" -n "$label" ${detached[@]+"${detached[@]}"}
+        echo "resumed=$id" >>"$STATE_DIR/$name.spawn"
+        opened=$((opened + 1)); echo "+ $label: no terminal tab (exit $rc) — resumed $id detached, drivable from Remote Control ($cwd)" >&2
+      else
+        rm -f "$STATE_DIR/$name.spawn"
+        echo "! $label: no terminal tab could be opened (exit $rc) — run it yourself: $launcher" >&2
+      fi
+    done <<<"$plan"
+    [ "$opened" -gt 0 ] && keepawake_hold
+    echo "restored $opened session(s)" >&2
     ;;
   ""|-h|--help) usage ;;
   *) die "unknown subcommand: $cmd (see --help)";;

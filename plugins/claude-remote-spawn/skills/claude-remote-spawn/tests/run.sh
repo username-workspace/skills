@@ -649,16 +649,85 @@ out=$(open_run_rc open --detach); rc="${out##*$'\n'}"
 assert_eq 1 "$rc" "57. open --detach → exit 1 (unknown flag)"
 
 # 58. Warp has no AppleScript: a Tab Config opened by URI runs the launcher in a tab of the active window
-printf '#!/usr/bin/env bash\necho "open $*" >> "%s"\n' "$ROOT/term.cap" > "$ROOT/bin/open"; chmod +x "$ROOT/bin/open"
+cat > "$ROOT/bin/open" <<EOF
+#!/usr/bin/env bash
+echo "open \$*" >> "$ROOT/term.cap"
+f="\$HOME/.warp/tab_configs/\${1#warp://tab_config/}.toml"
+[ -n "\${WARP_IGNORES:-}" ] || { cat "\$f" > "$ROOT/tab.cap"; rm -f "\$f"; }
+EOF
+chmod +x "$ROOT/bin/open"
 OS="$ROOT/os"; mkdir -p "$OS"; printf '#!/usr/bin/env bash\necho "${FAKE_OS:-Darwin}"\n' > "$OS/uname"; chmod +x "$OS/uname"
 : > "$ROOT/term.cap"; tc="$HOME/.warp/tab_configs/crs-inwarp.toml"
 out=$(TP=WarpTerminal PATH="$OS:$PATH" open_run open inwarp)
 assert_contains "open warp://tab_config/crs-inwarp" "$(cat "$ROOT/term.cap")" "58. open (Warp) → opens its Tab Config by URI"
-assert_contains "\"exec $STATE/inwarp.cmd\"" "$(cat "$tc" 2>/dev/null)" "58. Warp tab execs the launcher, so the tab ends with the session"
-assert_contains "\"rm -f $tc\"" "$(cat "$tc" 2>/dev/null)" "58. Warp Tab Config deletes itself once its tab runs"
+assert_contains "\"exec $STATE/inwarp.cmd\"" "$(cat "$ROOT/tab.cap" 2>/dev/null)" "58. Warp tab execs the launcher, so the tab ends with the session"
+assert_contains "\"rm -f $tc\"" "$(cat "$ROOT/tab.cap" 2>/dev/null)" "58. Warp Tab Config deletes itself once its tab runs"
 run stop inwarp >/dev/null 2>&1 || true
 out=$(FAKE_OS=Linux TP=WarpTerminal PATH="$OS:$PATH" open_run open linwarp)
 assert_contains "isn't auto-openable" "$out" "58. Warp off macOS → not auto-openable (Tab Configs live elsewhere)"
+out=$(WARP_IGNORES=1 CRS_TAB_WAIT=3 TP=WarpTerminal PATH="$OS:$PATH" open_run_rc open unopened)
+assert_eq 1 "${out##*$'\n'}" "58. Warp never runs the tab → open fails instead of claiming a tab"
+assert_contains "did not open the tab" "$out" "58. Warp never runs the tab → says the terminal did not open it"
+[ ! -e "$HOME/.warp/tab_configs/crs-unopened.toml" ] && ok "58. an unopened Tab Config is removed" || ko "58. an unopened Tab Config was left behind"
+
+# 59-64. snapshot and restore: the registry holds live and dead sessions, the snapshots one file per boot
+REG="$ROOT/registry"; SNAPS="$ROOT/snaps"; mkdir -p "$REG" "$SNAPS"
+printf '#!/usr/bin/env bash\nsleep 60\n' > "$ROOT/fakeclaude"; chmod +x "$ROOT/fakeclaude"
+"$ROOT/fakeclaude" --remote-control kept --permission-mode auto "a prompt" & p_cli=$!
+"$ROOT/fakeclaude" & p_desk=$!
+sleep 0.3
+lstart(){ LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" | sed 's/ *$//'; }
+reg(){ printf '{"pid":%s,"sessionId":"%s","cwd":"%s","procStart":"%s","kind":"interactive","entrypoint":"%s","name":"%s"}\n' "$1" "$2" "$3" "$4" "$5" "$6" > "$REG/$1.json"; }
+mkdir -p "$ROOT/proj"
+reg "$p_cli" "11111111-aaaa" "$ROOT/proj" "$(lstart "$p_cli")" cli "Kept Session"
+reg "$p_desk" "22222222-bbbb" "$ROOT/proj" "$(lstart "$p_desk")" claude-desktop desk
+reg 999999 "33333333-cccc" "$ROOT/proj" "Mon Jan  1 00:00:00 2024" cli dead
+reg "$$" "44444444-dddd" "$ROOT/proj" "Mon Jan  1 00:00:00 2024" cli reused
+snap(){ CRS_SESSIONS_DIR="$REG" CRS_SNAPSHOT_DIR="$SNAPS" CRS_BOOT_ID="$1" run snapshot; }
+out=$(snap boot1)
+s1="$(cat "$SNAPS/boot1.json" 2>/dev/null)"
+assert_contains "11111111-aaaa" "$s1" "59. snapshot keeps a live CLI session"
+assert_absent "22222222-bbbb" "$s1" "59. snapshot leaves out a desktop-app session"
+assert_absent "33333333-cccc" "$s1" "59. snapshot leaves out a dead session"
+assert_absent "44444444-dddd" "$s1" "59. snapshot leaves out a pid reused by another process"
+assert_contains '"--remote-control",' "$s1" "59. snapshot keeps the launch flags"
+assert_absent "a prompt" "$s1" "59. snapshot drops the initial prompt"
+kill "$p_cli" "$p_desk" 2>/dev/null; wait "$p_cli" "$p_desk" 2>/dev/null
+rm -f "$REG/$p_cli.json"
+out=$(CRS_SNAPSHOT=0 CRS_SESSIONS_DIR="$REG" CRS_SNAPSHOT_DIR="$SNAPS" CRS_BOOT_ID=off run snapshot)
+[ ! -e "$SNAPS/off.json" ] && ok "60. CRS_SNAPSHOT=0 → no snapshot" || ko "60. CRS_SNAPSHOT=0 still wrote a snapshot"
+sleep 1.1; printf '{"boot":"boot2","sessions":[]}\n' > "$SNAPS/boot2.json"
+restore(){ CRS_SESSIONS_DIR="$REG" CRS_SNAPSHOT_DIR="$SNAPS" CRS_BOOT_ID=boot2 open_run restore "$@"; }
+out=$(restore --dry-run)
+assert_contains "boot1.json" "$out" "61. restore reads the newest snapshot of a PREVIOUS boot, not this boot's"
+assert_contains "would resume 11111111-aaaa" "$out" "61. --dry-run names what it would reopen"
+[ ! -e "$STATE/kept-session.spawn" ] && ok "61. --dry-run opens nothing" || ko "61. --dry-run opened a session"
+: > "$ROOT/osascript.cap"
+out=$(restore)
+assert_contains "resumed 11111111-aaaa in a new tab" "$out" "62. restore reopens the session in a tab"
+l62="$(cat "$STATE/kept-session.cmd" 2>/dev/null)"
+assert_contains "--resume 11111111-aaaa -n Kept\\ Session --remote-control kept --permission-mode auto" "$l62" "62. in place, under its name, with its launch flags"
+assert_absent "fork-session" "$l62" "62. restore never forks: the same session id comes back"
+assert_contains "resumed=11111111-aaaa" "$(cat "$STATE/kept-session.spawn" 2>/dev/null)" "62. the restored session is a claude-remote-spawn session (list/stop)"
+run stop kept-session >/dev/null 2>&1 || true
+reg "$$" "11111111-aaaa" "$ROOT/proj" "$(lstart "$$")" cli "Kept Session"
+out=$(restore)
+assert_contains "already running" "$out" "63. a session already running is not reopened twice"
+rm -f "$REG/$$.json"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["sessions"][0]["cwd"]="/nonexistent/x"; json.dump(d,open(sys.argv[1],"w"))' "$SNAPS/boot1.json"
+out=$(restore)
+assert_contains "no longer exists" "$out" "63. a session whose folder is gone is skipped and named"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["sessions"][0]["cwd"]=sys.argv[2]; json.dump(d,open(sys.argv[1],"w"))' "$SNAPS/boot1.json" "$ROOT/proj"
+out=$(restore other-name)
+assert_contains "restored 0 session" "$out" "63. name filter → only the sessions named"
+: > "$ROOT/script.cap"
+out=$(WARP_IGNORES=1 CRS_TAB_WAIT=3 TP=WarpTerminal PATH="$OS:$PATH" CRS_SESSIONS_DIR="$REG" CRS_SNAPSHOT_DIR="$SNAPS" CRS_BOOT_ID=boot2 open_run restore)
+for _ in $(seq 1 50); do [ -s "$ROOT/script.cap" ] && break; sleep 0.1; done
+assert_contains "resumed 11111111-aaaa detached" "$out" "64. no tab opened → restore goes detached instead of losing the session"
+c64="$(cat "$ROOT/script.cap" 2>/dev/null)"
+assert_contains "--remote-control kept-session --resume 11111111-aaaa -n Kept Session --permission-mode auto" "$c64" "64. detached: in place, Remote-Control-visible, flags kept"
+[ "$(printf '%s' "$c64" | grep -o -- '--remote-control' | wc -l | tr -d ' ')" = 1 ] && ok "64. detached: --remote-control passed once" || ko "64. detached: --remote-control duplicated [$c64]"
+run stop kept-session >/dev/null 2>&1 || true
 rm -f "$ROOT/bin/open"
 
 echo
