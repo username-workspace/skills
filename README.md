@@ -38,7 +38,7 @@ its own.
 | [`claude-remote-spawn`](./plugins/claude-remote-spawn) | 1.7.0 | Agents | Spawn a new Claude Code session remotely, on your own machine. |
 | [`find-session`](./plugins/find-session) | 1.0.4 | Agents | Find and resume the past Claude Code session you're thinking of. |
 | [`remote-control-pilot`](./plugins/remote-control-pilot) | 1.0.0 | Agents | Drive the Claude Code sessions running on your other machines, and read back what they did. |
-| [`warp-session-restore`](./plugins/warp-session-restore) | 1.0.0 | Agents | Reboot without losing your Claude Code sessions in Warp. |
+| [`warp-session-restore`](./plugins/warp-session-restore) | 2.0.0 | Agents | Reboot without losing your Claude Code sessions in Warp. |
 | [`delivery-metrics`](./plugins/delivery-metrics) | 1.0.7 | Analytics | Turn git history into a developer productivity & quality dashboard. |
 | [`aws-remote-auth`](./plugins/aws-remote-auth) | 1.0.5 | DevOps | Re-authenticate to AWS from anywhere, on demand, with an autofill device code. |
 | [`delivery-conductor`](./plugins/delivery-conductor) | 0.2.0 | DevOps | State a need, get a ready PR/MR: the conductor sequences commit, gate, proof, review, push and CI. |
