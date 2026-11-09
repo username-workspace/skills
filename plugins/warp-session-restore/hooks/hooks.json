@@ -21,6 +21,17 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/skills/warp-session-restore/scripts/warp_session_restore.py snapshot --quiet",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

@@ -10,8 +10,11 @@ restore   reopen each session in Warp, one tab per session, `claude --resume <id
 check     what the machine offers: the launch configurations and Tab Configs folders, Warp's plugin for
           Claude Code notifications, the snapshots.
 """
+import ctypes
+import ctypes.util
 import json
 import os
+import select
 import shlex
 import subprocess
 import sys
@@ -31,6 +34,9 @@ KEEP = 10
 COLORS = ["blue", "green", "yellow", "magenta", "cyan", "red"]
 VALUED_FLAGS = {"--permission-mode", "--model", "--effort", "--add-dir", "--agent", "--settings"}
 BARE_FLAGS = {"--dangerously-skip-permissions", "--chrome", "--ide"}
+SHELLS = {"bash", "sh", "zsh"}
+ENDED = {"prompt_input_exit", "clear", "logout"}
+DETACH_DRIVER = os.environ.get("WS_DETACH_DRIVER", HOME + "/.claude/skills/claude-remote-spawn/driver.sh")
 
 
 def boot_id():
@@ -61,8 +67,34 @@ def alive(entry):
     return not started or " ".join(ps(pid, "lstart").split()) == " ".join(started.split())
 
 
-def launch_flags(argv):
-    tokens = shlex.split(argv) if argv else []
+def argv_of(pid):
+    if not pid:
+        return []
+    if not MAC:
+        try:
+            with open("/proc/%d/cmdline" % pid, "rb") as f:
+                return [a.decode(errors="replace") for a in f.read().split(b"\0") if a]
+        except OSError:
+            return []
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    mib, size = (ctypes.c_int * 3)(1, 49, pid), ctypes.c_size_t(0)
+    if libc.sysctl(mib, 3, None, ctypes.byref(size), None, 0):
+        return []
+    buf = ctypes.create_string_buffer(size.value)
+    if libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0):
+        return []
+    raw = buf.raw[:size.value]
+    argc, rest = int.from_bytes(raw[:4], sys.byteorder), raw[4:]
+    rest = rest[rest.find(b"\0"):].lstrip(b"\0")
+    return [a.decode(errors="replace") for a in rest.split(b"\0")[:argc]]
+
+
+def parent_of(pid):
+    ppid = ps(pid, "ppid")
+    return int(ppid) if ppid.isdigit() else 0
+
+
+def launch_flags(tokens):
     kept, i = [], 1
     while i < len(tokens):
         tok = tokens[i]
@@ -97,22 +129,58 @@ def live_claude_sessions():
     return sessions
 
 
+def repo_root(cwd):
+    common = subprocess.run(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                            capture_output=True, text=True).stdout.strip() if os.path.isdir(cwd) else ""
+    if not common:
+        return ""
+    return os.path.realpath(os.path.dirname(common) if os.path.basename(common) == ".git" else common.rstrip("/"))
+
+
 def folder_group(cwd):
     if not cwd or os.path.realpath(cwd) == os.path.realpath(HOME):
         return "home"
-    common = subprocess.run(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                            capture_output=True, text=True).stdout.strip()
-    if common:
-        return os.path.basename(os.path.dirname(common) if os.path.basename(common) == ".git" else common.rstrip("/"))
-    return os.path.basename(cwd.rstrip("/"))
+    return os.path.basename(repo_root(cwd) or cwd.rstrip("/"))
+
+
+def launcher(parent, cwd):
+    script = os.path.realpath(parent[1]) if len(parent) > 1 and os.path.basename(parent[0]) in SHELLS else ""
+    root = repo_root(cwd)
+    if not script or not root or not script.startswith(root + os.sep):
+        return None
+    head = parent[2:3] if len(parent) > 2 and not parent[2].startswith("-") else []
+    return {"argv": [os.path.basename(parent[0]), script] + head, "flags": launch_flags(parent[1:])}
+
+
+def entry(e):
+    parent = argv_of(parent_of(e["pid"]))
+    cwd = e.get("cwd") or ""
+    s = {"sessionId": e["sessionId"], "name": "" if e.get("nameSource") == "derived" else e.get("name") or "",
+         "cwd": cwd, "group": folder_group(cwd), "flags": launch_flags(argv_of(e["pid"]))}
+    run_by = launcher(parent, cwd)
+    if run_by:
+        s["launcher"] = run_by
+    if parent and os.path.basename(parent[0]) == "script":
+        s["detached"] = True
+    return s
+
+
+def ended_session():
+    if sys.stdin is None or sys.stdin.isatty() or not select.select([sys.stdin], [], [], 0.5)[0]:
+        return ""
+    try:
+        event = json.loads(sys.stdin.read() or "{}")
+    except ValueError:
+        return ""
+    ended = event.get("hook_event_name") == "SessionEnd" and event.get("reason") in ENDED
+    return event.get("session_id", "") if ended else ""
 
 
 def snapshot(quiet):
     if os.environ.get("WS_SNAPSHOT") == "0":
         return
-    sessions = [{"sessionId": e["sessionId"], "name": e.get("name") or "", "cwd": e.get("cwd") or "",
-                 "group": folder_group(e.get("cwd") or ""), "flags": launch_flags(ps(e["pid"], "args"))}
-                for e in live_claude_sessions()]
+    ended = ended_session()
+    sessions = [entry(e) for e in live_claude_sessions() if e["sessionId"] != ended]
     os.makedirs(SNAP_DIR, exist_ok=True)
     boot = boot_id()
     path = os.path.join(SNAP_DIR, boot + ".json")
@@ -171,8 +239,17 @@ def title(s):
 
 
 def command(s):
-    argv = ["claude", "--resume", s["sessionId"]] + (["-n", s["name"]] if s["name"] else []) + s["flags"]
+    run_by = s.get("launcher")
+    head, flags = (run_by["argv"], run_by["flags"]) if run_by else (["claude"], s["flags"])
+    argv = head + ["--resume", s["sessionId"]] + (["-n", s["name"]] if s["name"] else []) + flags
     return " ".join(shlex.quote(a) for a in argv)
+
+
+def detach(s):
+    model = s["flags"][s["flags"].index("--model") + 1:][:1] if "--model" in s["flags"] else []
+    argv = [DETACH_DRIVER, "resume", s["sessionId"], s["name"] or s["sessionId"][:8], "--in-place"]
+    subprocess.run(argv + (["--model"] + model if model else []), cwd=s["cwd"], check=False,
+                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def tab_toml(s, color, name, path):
@@ -216,9 +293,11 @@ def restore(args):
         elif not os.path.isdir(s["cwd"]):
             report.append("! %s: %s no longer exists (%s)" % (title(s), s["cwd"], s["sessionId"]))
         else:
-            report.append("+ %s: resumes %s in %s [%s]" % (title(s), s["sessionId"], s["cwd"], s["group"]))
+            how = "detached" if s.get("detached") and os.path.exists(DETACH_DRIVER) else s["group"]
+            report.append("+ %s: resumes %s in %s [%s]" % (title(s), s["sessionId"], s["cwd"], how))
             todo.append(s)
-    groups = grouped(todo)
+    detached = [s for s in todo if s.get("detached") and os.path.exists(DETACH_DRIVER)]
+    groups = grouped([s for s in todo if s not in detached])
     in_window = "--window" not in args and warp_running()
     files = []
     if in_window:
@@ -238,6 +317,8 @@ def restore(args):
         for _, _, body in files:
             sys.stdout.write(body)
         return
+    for s in detached:
+        detach(s)
     opener = os.environ.get("WS_OPEN", "open" if MAC else "xdg-open")
     for n, (name, target, body) in enumerate(files):
         os.makedirs(os.path.dirname(target), exist_ok=True)

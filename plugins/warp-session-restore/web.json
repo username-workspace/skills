@@ -6,6 +6,8 @@
     "Snapshots every running Claude Code CLI session on each session start and turn end: its folder, name and the launch flags worth replaying (remote control, permission mode, model, effort, extra dirs)",
     "Groups sessions by folder: the git repository they run in, worktrees and subfolders included, else the folder itself",
     "Restores each session in a Warp tab running claude --resume in place: same session id, same Remote Control entry",
+    "Resumes a session its repository's launcher started through that launcher, and a detached session detached again",
+    "Drops a session closed with /exit from the snapshot, keeps one a shutdown stopped",
     "Opens them in the window of the Warp already running, or starts Warp with one colored tab group per folder",
     "Waits until every resumed session runs again, and says which did not",
     "Restores only the sessions you name, or previews with --dry-run",

@@ -11,10 +11,16 @@ allowed-tools: Bash
 ## Snapshot
 
 The plugin's hook takes it on every session start and turn end, so a boot's snapshot holds the sessions
-alive at the last turn before the shutdown. `snapshot` takes one by hand and prints it.
+alive at the last turn before the shutdown, and on every session end: a session closed with `/exit` (or
+`/clear`, a logout) leaves it, one a shutdown stops stays. `snapshot` takes one by hand and prints it.
 
 - **Sessions** — each live Claude Code CLI session of `~/.claude/sessions`: its id, name, folder and the
-  launch flags worth replaying. A session of the Claude desktop app is left out: the app reopens its own.
+  launch flags worth replaying, read from the process's exact arguments. A name Claude Code derived is
+  not kept, so the resumed session derives its own again. A session of the Claude desktop app is left
+  out: the app reopens its own.
+- **Launcher** — a session started by a script of its own repository (a workspace's `bin/claude-session`)
+  keeps that script, its first argument when it is not a flag, and the flags given to it.
+- **Detached** — a session run under `script(1)`, as `claude-remote-spawn --detach` runs one.
 - **Group** — the folder the session runs in: the git repository it belongs to (a subfolder or a
   worktree joins its repository), else the folder's name; the home folder is `home`.
 - One file per boot under `~/.claude/warp-snapshots/`, the last ten kept.
@@ -25,7 +31,10 @@ alive at the last turn before the shutdown. `snapshot` takes one by hand and pri
 
 It reads the newest snapshot taken **before the current boot**. Each session opens in its own tab, in
 its folder, running `claude --resume <id> -n <name> <flags>` — the same transcript and the same Remote
-Control entry. Groups come in name order, each with its color, its sessions in name order.
+Control entry — or, when a launcher started it, `<launcher> --resume <id> <its flags>`, so the launcher
+sets up what it sets up again. A detached session comes back detached, through
+`claude-remote-spawn resume <id> <name> --in-place`, in no tab. Groups come in name order, each with its
+color, its sessions in name order.
 
 - **Warp running** — the tabs open in Warp's active window, one Tab Config each
   (`~/.warp/tab_configs/warp-session-restore-<n>.toml`, opened with `warp://tab_config/<name>`, deleted by
@@ -62,3 +71,5 @@ Warp's own agents, never a Claude Code session.
 - `WS_LAUNCH_DIR`, `WS_TAB_DIR`, `WS_SESSIONS_DIR`, `WS_SNAPSHOT_DIR` — override where the launch
   configurations, the Tab Configs, Claude Code's session registry and the snapshots are.
 - `WS_OPEN_WAIT` — seconds restore waits for the resumed sessions (default 30).
+- `WS_DETACH_DRIVER` — the `claude-remote-spawn` driver a detached session comes back through (default
+  `~/.claude/skills/claude-remote-spawn/driver.sh`); absent, it opens in a tab like the others.

@@ -1,7 +1,7 @@
 {
   "name": "warp-session-restore",
-  "version": "2.0.0",
-  "description": "Restart your Claude Code sessions in Warp after a reboot: a hook snapshots every running Claude Code CLI session (folder, name, launch flags) on each session start and turn end; restore reopens each one in a Warp tab, grouped by folder (its git repository, worktrees included), resuming it in place. In the running Warp's window, or as a launch configuration that starts Warp with one tab group per folder. macOS and Linux.",
+  "version": "2.1.0",
+  "description": "Restart your Claude Code sessions in Warp after a reboot: a hook snapshots every running Claude Code CLI session (folder, name, launch flags, the project launcher that started it) on each session start and turn end, and drops one closed with /exit; restore reopens each one in a Warp tab, grouped by folder (its git repository, worktrees included), resuming it in place. In the running Warp's window, or as a launch configuration that starts Warp with one tab group per folder. macOS and Linux.",
   "author": {
     "name": "Username",
     "email": "admin@username.digital"
