@@ -28,7 +28,7 @@ chmod +x "$ROOT/bin/ps"; export PATH="$ROOT/bin:$PATH"
 printf '#!/usr/bin/env bash\nsleep 60\n' > "$ROOT/fakeclaude"; chmod +x "$ROOT/fakeclaude"
 lstart(){ LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" | sed 's/ *$//'; }
 reg(){ printf '{"pid":%s,"sessionId":"%s","cwd":"%s","procStart":"%s","kind":"interactive","entrypoint":"%s","name":"%s"}\n' "$1" "$2" "$3" "$(lstart "$1")" "$4" "$5" > "$REG/$1.json"; }
-"$ROOT/fakeclaude" --remote-control alpha --permission-mode auto "a prompt" & PA=$!
+"$ROOT/fakeclaude" --remote-control alpha --permission-mode auto "a prompt that's quoted once" & PA=$!
 "$ROOT/fakeclaude" --model opus & PB=$!
 "$ROOT/fakeclaude" & PC=$!
 "$ROOT/fakeclaude" --effort medium & PH=$!
@@ -53,7 +53,7 @@ assert_eq plain "$(group_of cccc-3333)" "2. a folder outside git is its own grou
 assert_eq home "$(group_of hhhh-4444)" "2. the home folder is the group home"
 assert_absent "dddd-5555" "$s1" "2. a desktop-app session is left out"
 assert_absent "dead-6666" "$s1" "2. a dead session is left out"
-assert_absent "a prompt" "$s1" "2. the initial prompt is not replayed"
+assert_absent "a prompt" "$s1" "2. the initial prompt is not replayed, an unbalanced quote included"
 assert_contains "group repo" "$out" "2. snapshot prints the groups"
 
 out=$(WS_SNAPSHOT=0 WS_BOOT_ID=off ws snapshot)
@@ -124,6 +124,29 @@ assert_eq 0 "$rc" "10. its session running again → exit 0"
 for f in "$REG"/*.json; do grep -q aaaa-1111 "$f" && { kill "$(basename "$f" .json)" 2>/dev/null; rm -f "$f"; }; done
 y=$(STUB_WARP=1 WS_BOOT_ID=boot2 ws restore --dry-run --window)
 assert_contains '- name: "repo"' "$y" "11. --window opens a new window, groups included"
+
+mkdir -p "$ROOT/repo/bin" "$ROOT/sessions2"
+printf '#!/usr/bin/env bash\n"%s" --add-dir sub "$@"\n:\n' "$ROOT/fakeclaude" > "$ROOT/repo/bin/launch"
+(cd "$ROOT/repo" && bash "$ROOT/repo/bin/launch" --model opus "first ask" >/dev/null 2>&1 &)
+(cd "$ROOT/repo" && exec -a script bash -c "\"$ROOT/fakeclaude\" --remote-control lab & wait" >/dev/null 2>&1 &)
+sleep 0.5
+child(){ pgrep -f "$1" | while read -r p; do pgrep -P "$p"; done | head -1; }
+PL=$(child "$ROOT/repo/bin/launch"); PS=$(child "^script -c.*$ROOT")
+REG2="$ROOT/sessions2"; reg2(){ printf '{"pid":%s,"sessionId":"%s","cwd":"%s","procStart":"%s","kind":"interactive","entrypoint":"cli","name":"%s","nameSource":"%s"}\n' "$1" "$2" "$3" "$(lstart "$1")" "$4" "$5" > "$REG2/$1.json"; }
+reg2 "$PL" llll-7777 "$ROOT/repo" repo-12 derived
+reg2 "$PS" ssss-8888 "$ROOT/repo" lab user
+WS_SESSIONS_DIR="$REG2" WS_BOOT_ID=boot3 ws snapshot --quiet </dev/null
+y=$(WS_SESSIONS_DIR="$ROOT/none" WS_DETACH_DRIVER="$ROOT/bin/opener" WS_BOOT_ID=boot4 ws restore --dry-run --window --from "$SNAPS/boot3.json")
+assert_contains "\"bash $(cd "$ROOT/repo" && pwd -P)/bin/launch --resume llll-7777 --model opus\"" "$y" "12. a session its repository's launcher started resumes through that launcher, with the flags given to it"
+assert_absent "-n repo-12" "$y" "12. … a name Claude Code derived is not imposed on it"
+assert_absent "first ask" "$y" "12. … nor the launcher's prompt"
+assert_contains "lab: resumes ssss-8888 in $ROOT/repo [detached]" "$y" "13. a session that ran detached comes back detached"
+assert_absent "resume ssss-8888" "$y" "13. … in no Warp tab"
+end(){ printf '{"hook_event_name":"SessionEnd","reason":"%s","session_id":"%s"}' "$1" "$2" | WS_SESSIONS_DIR="$REG2" WS_BOOT_ID=boot5 python3 "$WS" snapshot --quiet; cat "$SNAPS/boot5.json"; }
+assert_absent "ssss-8888" "$(end prompt_input_exit ssss-8888)" "14. a session closed with /exit leaves the snapshot"
+assert_contains "ssss-8888" "$(end other ssss-8888)" "14. … one stopped by a shutdown stays in it"
+pkill -f "$ROOT/repo/bin/launch" 2>/dev/null; pkill -f "^script -c.*$ROOT" 2>/dev/null
+for f in "$REG2"/*.json; do kill "$(basename "$f" .json)" 2>/dev/null; done
 
 kill "$PD" 2>/dev/null
 for f in "$REG"/*.json; do p="$(basename "$f" .json)"; [ "$p" = 999999 ] || kill "$p" 2>/dev/null; done
