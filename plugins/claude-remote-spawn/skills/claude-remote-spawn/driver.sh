@@ -171,7 +171,8 @@ dq_escape(){ printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
 # Open `launcher` in a NEW tab of the terminal that launched the skill. Returns 2 for a terminal we can't
 # script, 3 when osascript is absent — the caller then falls back or tells the user to run the launcher.
-open_terminal_tab(){
+open_terminal_tab()(
+  unset $PARENT_SESSION_ENV
   local launcher="$1" q; q="$(printf '%q' "$launcher")"
   if [ -n "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then tmux new-window "$q"; return; fi
   if [ "${TERM_PROGRAM:-}" = WezTerm ] && command -v wezterm >/dev/null 2>&1; then wezterm cli spawn -- "$launcher" >/dev/null; return; fi
@@ -214,7 +215,7 @@ OSA
       { [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v x-terminal-emulator >/dev/null 2>&1; } || return 2
       (x-terminal-emulator -e "$launcher" >/dev/null 2>&1 &) ;;
   esac
-}
+)
 
 # $1=terminal recorded by the launcher, $2=its tab (iTerm session id or tty). Only called once the tab
 # runs no job, so the terminal closes it without a "close running session?" prompt.
