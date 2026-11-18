@@ -661,6 +661,21 @@ out=$(FAKE_OS=Linux TP=WarpTerminal PATH="$OS:$PATH" open_run open linwarp)
 assert_contains "isn't auto-openable" "$out" "58. Warp off macOS → not auto-openable (Tab Configs live elsewhere)"
 rm -f "$ROOT/bin/open"
 
+# 59. the terminal a tab opener starts is top-level too: a terminal not yet running inherits the opener's
+# environment for its whole life, and every claude typed in any of its tabs then runs as a child session
+LEAK="$ROOT/leak"; mkdir -p "$LEAK"
+for t in open osascript; do
+  printf '#!/usr/bin/env bash\ncat >/dev/null\nenv | grep -E "^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_[A-Z_]*|TRACEPARENT)=" >> "%s"\n' "$ROOT/term-env.cap" > "$LEAK/$t"; chmod +x "$LEAK/$t"
+done
+for tp in WarpTerminal iTerm.app; do
+  : > "$ROOT/term-env.cap"
+  (for m in $MARKERS; do export "$m=from-parent"; done; TP=$tp PATH="$LEAK:$OS:$PATH" open_run open "leak${tp%%.*}") >/dev/null 2>&1
+  for m in $MARKERS; do
+    assert_eq 0 "$(grep -c "^$m=" "$ROOT/term-env.cap")" "59. open ($tp): the launching session's $m never reaches the terminal it starts"
+  done
+  run stop "leak${tp%%.*}" >/dev/null 2>&1 || true
+done
+
 echo
 echo "PASS=$PASS FAIL=$FAIL"
 rm -rf "$ROOT"
