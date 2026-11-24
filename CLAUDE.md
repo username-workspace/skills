@@ -41,7 +41,9 @@ A defect found in real usage is fixed **evidence-first**, with the proof-of-fix 
 
 1. Reproduce it deterministically *before* touching code — the smallest failing probe, recorded
    (`proof-of-fix record`, accepted only if it fails).
-2. Fix the root cause — never the symptom, never a weakened probe.
+2. Name the origin, the commit that introduced the defect, before the first edit
+   (`proof-of-fix origin --commit <sha>`), then fix the code there — never the symptom, never a
+   weakened probe.
 3. Prove it with the same probe (`proof-of-fix check`), and land the repro as a **permanent test** in
    the owning suite (or `tests/harness/run.sh` when it crosses plugins).
 

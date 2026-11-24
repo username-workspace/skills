@@ -2,8 +2,9 @@
 name: proof-of-fix
 description: >-
   Evidence-first bug fixing: prove the bug BEFORE touching code (a recorded probe that must FAIL),
-  fix the root cause, then prove the fix with the SAME probe (`check` passes only when it runs
-  green). Auto-engaging: a bug-shaped prompt ("fix", "bug", "regression", "ça casse", "échoue", …)
+  name the commit that introduced it, fix the code at that origin, then prove the fix with the SAME
+  probe (`check` passes only when it runs green and the fix edits a file the origin changed).
+  Auto-engaging: a bug-shaped prompt ("fix", "bug", "regression", "ça casse", "échoue", …)
   injects the protocol into context, and a Stop hook re-runs an open repro itself — auto-closing it
   on green, handing back the failing output on red (bounded, never a loop). Use when fixing any bug,
   when asked to validate a fix empirically, or via /proof-of-fix. Horizontal: any repo, any stack —
@@ -13,8 +14,8 @@ description: >-
 # proof-of-fix
 
 A fix you cannot demonstrate is a guess. This skill turns "trust me, it's fixed" into two runs of the
-same probe: **red before** the change, **green after** — the discipline that separates a root-cause
-fix from a plausible-looking edit.
+same probe, **red before** the change and **green after**, on a fix that lands where the defect
+originates: a guard beside the defect turns a probe green as well as a correction does.
 
 ## The protocol
 
@@ -25,12 +26,28 @@ fix from a plausible-looking edit.
    ```
    `record` runs the probe and **refuses it if it exits 0** — a repro that passes proves nothing.
    If you cannot reproduce, say so and stop instead of fixing blind.
-2. **Fix the root cause.** Never weaken the probe to make it pass — the probe is the contract.
-3. **Prove the fix with the same probe.**
+2. **Name the origin before the first edit.** Find the commit that introduced the defect
+   (`git log -S`, `-G` or `-L`, `git blame`, `git bisect`), or the commit that first added the code
+   when it already carried the defect, and declare it:
    ```bash
-   python3 scripts/repro.py check                       # green → proven; red → failing output
+   python3 scripts/repro.py origin --commit <sha>       # a commit of the history the repro was recorded on
    ```
-   Share both runs (the recorded failure, the passing check) as the evidence for "fixed".
+3. **Fix the code at that origin.** Where that commit switched off, removed or bypassed something
+   that worked, restore it. Never weaken the probe to make it pass — the probe is the contract. A fix
+   that cannot land in that commit's files is declared with its reason, alone or with `--commit`: the
+   origin sits in a system you cannot change, an incident needs a mitigation the real fix will remove,
+   or the commit broke code it did not edit (a dependency upgrade, a contract change):
+   ```bash
+   python3 scripts/repro.py origin --exception '<why the fix lands outside the origin>'
+   ```
+4. **Prove the fix with the same probe.**
+   ```bash
+   python3 scripts/repro.py check                       # green at the origin → proven
+   ```
+   `check` closes the repro when the probe passes **and** the fix edits a file the origin commit
+   changed (renames followed), or carries a declared exception. A green probe with no origin named,
+   or with a fix beside the origin's files, stays open and says what is missing. Share the recorded
+   failure, the origin and the passing check as the evidence for "fixed".
 
 The best probe is a real test committed with the fix — `record --cmd 'pytest tests/test_x.py -k repro'`
 — so the repro becomes a permanent regression guard. A throwaway command is fine when a test doesn't
@@ -43,9 +60,10 @@ fit; the discipline is the same.
   that also arrive as prompts (task notifications, agent hand-backs, cross-session messages) never
   nudge: their wording is model output, not the user asking for a fix.
 - **Stop** — when this session's recorded repro is still open and the work-state changed since the last attempt,
-  the hook **re-runs the probe itself**: green → the repro is auto-proven and a one-line
-  `systemMessage` says so; red → a `block` hands the failing output back to the session to keep
-  fixing. One attempt per work-state, capped at 5 per repro — an unconverging fix ends the turn, it
+  the hook **re-runs the probe itself**: green at the origin → the repro is auto-proven and a one-line
+  `systemMessage` says so; green with no origin named, or with a fix beside it → a `block` asks for the
+  origin; red → a `block` hands the failing output back to the session to keep fixing. Naming the
+  origin re-arms the hook at the current work state. One attempt per work-state, capped at 5 per repro — an unconverging fix ends the turn, it
   never loops the Stop hook.
 
 State lives in `.git/proof-of-fix.json` (never committed), **owned by the session that recorded it**:
@@ -58,13 +76,14 @@ probe. Opt a repo out with `{ "enabled": false }` in `.proof-of-fix.json`.
 
 ```bash
 python3 scripts/repro.py record --cmd 'pytest -x tests/test_bug.py'   # must fail to be accepted
-python3 scripts/repro.py check                                        # must pass to prove the fix
+python3 scripts/repro.py origin --commit <sha>                        # where the fix belongs
+python3 scripts/repro.py check                                        # must pass, at the origin, to prove the fix
 python3 scripts/repro.py status                                       # this session's repro state JSON
 python3 scripts/repro.py clear                                        # drop this session's obsolete repro
 ```
 
 `record --need N` binds a repro to a delivery-conductor need (it then escapes the 7-day session GC) and
-prints a neutral line. Every `check` records the work state it ran on and whether the tree held still
+prints a neutral line; such a repro closes on its green probe, without an origin. Every `check` records the work state it ran on and whether the tree held still
 while the probe ran; only such a check counts as proof for a need.
 
 ## When driven
@@ -123,3 +142,5 @@ Only **`git`** and **Python 3** (stdlib) — the probe itself can be anything yo
 - `check` proves the recorded probe passes — it cannot prove the probe was the *right* probe. A probe
   that never captured the bug stays your responsibility (that's why the failing `record` run is part
   of the evidence).
+- The origin check works on files: a fix that edits a file of the origin commit and leaves the faulty
+  lines as they were still passes it. Whether those lines were corrected is the reviewer's read.

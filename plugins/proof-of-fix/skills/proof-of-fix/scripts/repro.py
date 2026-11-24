@@ -4,7 +4,9 @@
 Deterministic plumbing for an evidence-first fix loop: `record` runs the reproduction command and
 accepts it only if it FAILS (a repro that passes proves nothing); `check` re-runs the exact same
 command and succeeds only when it is now green — so the probe that demonstrated the bug is the one
-that demonstrates the fix. State lives in .git (never committed), owned by the session that recorded
+that demonstrates the fix. A green probe closes a session repro only when the fix edits a file its
+`origin` commit changed (the commit that introduced the defect), or when a fix outside the origin is
+declared with its reason. State lives in .git (never committed), owned by the session that recorded
 it — concurrent sessions in one checkout never see each other's repro. A UserPromptSubmit hook nudges
 the protocol into context when a human prompt looks like a bug report (once per session per repo); a
 Stop hook re-runs the session's open repro itself when the work-state changed — auto-closing it on
@@ -26,12 +28,17 @@ INTENT_RE = re.compile(
     r"corrige[rz]?|r[ée]pare[rz]?|fails?|failing|failure|[ée]choue|cass[ée]e?s?|"
     r"doesn'?t\s+work|ne\s+(marche|fonctionne)\s+(plus|pas))\b", re.I)
 
-NUDGE = ("[proof-of-fix] This prompt looks like a bug/fix request. Evidence-first protocol: "
-         "(1) REPRODUCE before touching any code — write the smallest failing probe (a test or a "
-         "command) and record it: `python3 {script} record --repo {repo} --cmd '<probe>'` (it is "
-         "accepted only if it FAILS). (2) Fix the ROOT cause. (3) Prove it: `python3 {script} check "
-         "--repo {repo}` — the same probe must now pass; share both runs as evidence. If you cannot "
-         "reproduce, say so and stop instead of fixing blind. Not a bug fix after all? Ignore this.")
+NUDGE = ("[proof-of-fix] This prompt looks like a bug/fix request. Evidence-first protocol, before any "
+         "edit: (1) REPRODUCE: write the smallest failing probe (a test or a command) and record it: "
+         "`python3 {script} record --repo {repo} --cmd '<probe>'` (accepted only if it FAILS). "
+         "(2) NAME THE ORIGIN: find the commit that introduced the defect (`git log -S`, `git blame`, "
+         "`git bisect`), or the commit that first added the code when it already carried the defect, and "
+         "declare it: `python3 {script} origin --repo {repo} --commit <sha>`. (3) Fix the code at that "
+         "origin. A fix that cannot land there is declared with its reason: `python3 {script} origin "
+         "--repo {repo} --exception '<why>'`. (4) Prove it: `python3 {script} check --repo {repo}`: the "
+         "same probe must pass and the fix must edit a file the origin commit changed; share both runs "
+         "as evidence. If you cannot reproduce, say so and stop instead of fixing blind. Not a bug fix "
+         "after all? Ignore this.")
 
 MAX_NAGS = 5
 CMD_TIMEOUT = 120
@@ -112,6 +119,40 @@ def run_probe(repo, cmd):
         return 127, "bash: not found"
 
 
+def git_lines(repo, *args):
+    rc, out, _ = run(["git"] + list(args), repo)
+    return [line for line in out.splitlines() if line.strip()] if rc == 0 else []
+
+
+def fix_at_origin(repo, st):
+    """(closes, note) for a green probe. A session repro closes when the fix edits a file its origin
+    commit changed, renames followed, or when a fix outside the origin is declared with its reason: a
+    guard beside the defect turns the probe green as well as a correction does. A repro bound to a need,
+    or recorded without a HEAD to measure the fix from, closes on the green probe alone."""
+    if st.get("need") or not st.get("head"):
+        return True, ""
+    origin = st.get("origin") or {}
+    if origin.get("exception"):
+        return True, f" (fix outside the origin, declared: {origin['exception']})"
+    declare = f"python3 {shlex.quote(os.path.abspath(__file__))} origin --repo {shlex.quote(repo)}"
+    outside = f"A fix that cannot land in that code is declared with its reason: `{declare} --exception '<why>'`."
+    if not origin.get("commit"):
+        return False, ("the fix names no origin. Name the commit that introduced the "
+                       "defect, or the one that first added the code when it already carried the defect: "
+                       f"`{declare} --commit <sha>`. {outside}")
+    label = f"{origin.get('short') or origin['commit'][:9]} ({origin.get('subject', '')})"
+    changed = git_lines(repo, "diff-tree", "--root", "--no-commit-id", "--name-only", "-r", "-m", "--first-parent",
+                        origin["commit"])
+    fixed = git_lines(repo, "diff", "--name-only", st["head"]) + git_lines(repo, "ls-files", "--others",
+                                                                           "--exclude-standard")
+    for path in fixed:
+        names = [path] + git_lines(repo, "log", "--follow", "--name-only", "--format=", st["head"], "--", path)
+        if set(names) & set(changed):
+            return True, f" (the fix edits {path}, changed by the origin {label})"
+    return False, (f"the fix edits no file the origin {label} changed "
+                   f"({', '.join(changed[:5])}): it sits beside the defect. Move the fix into that code. {outside}")
+
+
 def repo_file(repo, rel):
     """The repo-relative path of a regular file inside the repo, else None."""
     root = os.path.realpath(repo)
@@ -184,14 +225,47 @@ def cmd_record(args):
               "fix, otherwise it proves nothing. Sharpen the probe (or the bug is already gone).")
         sys.exit(1)
     entry = {"started": datetime.now(timezone.utc).isoformat(), "cmd": args.cmd, "recorded_rc": rc,
-             "status": "open", "tail": tail, "nag": {}, "attempts": 0}
+             "status": "open", "tail": tail, "nag": {}, "attempts": 0, "head": work_state(repo)[0]}
     if args.need:
         entry["need"] = args.need
     write_repro(repo, session_of(args), entry)
     if args.need:
         print(f"[proof-of-fix] failing repro recorded for need {args.need} (exit {rc})")
         return
-    print(f"[proof-of-fix] ✓ failing repro recorded (exit {rc}) — fix the root cause, then run check")
+    print(f"[proof-of-fix] ✓ failing repro recorded (exit {rc}) — name the origin, fix it there, then run check")
+
+
+def cmd_origin(args):
+    """Where the session's fix belongs: the commit that introduced the defect (or first added the faulty
+    code), and, when the fix cannot land in that commit's files, the reason. Naming it re-arms the Stop
+    probe at the current work state."""
+    repo, sid = args.repo, session_of(args)
+    st = read_repro(repo, sid)
+    if not st:
+        print(no_repro_note(repo, sid))
+        sys.exit(1)
+    if not (args.commit or args.exception):
+        print("[proof-of-fix] ✗ origin needs --commit <sha>, --exception '<why>', or both", file=sys.stderr)
+        sys.exit(2)
+    origin = {}
+    if args.exception:
+        origin["exception"] = reason(args.exception, "--exception")
+    if args.commit:
+        rc, sha, _ = run(["git", "rev-parse", "--verify", "--quiet", args.commit + "^{commit}"], repo)
+        if rc != 0 or not sha:
+            print(f"[proof-of-fix] ✗ {args.commit} names no commit of this repo")
+            sys.exit(1)
+        if st.get("head") and run(["git", "merge-base", "--is-ancestor", sha, st["head"]], repo)[0] != 0:
+            print(f"[proof-of-fix] ✗ {args.commit} is not in the history the repro was recorded on: the origin "
+                  "is the commit that introduced the defect, not one made since")
+            sys.exit(1)
+        short, date, subject = (git_lines(repo, "log", "-1", "--date=short", "--format=%h%n%ad%n%s", sha) + [""] * 3)[:3]
+        origin.update(commit=sha, short=short, date=date, subject=subject)
+    st["origin"], st["nag"] = origin, {}
+    write_repro(repo, sid, st)
+    named = f"{origin['short']} ({origin['date']}) {origin['subject']}" if args.commit else ""
+    declared = f"fix outside the origin declared: {origin['exception']}" if args.exception else ""
+    print("[proof-of-fix] origin: " + " — ".join(x for x in (named, declared) if x))
 
 
 def check_need(repo, need, criteria):
@@ -231,10 +305,13 @@ def check_session(repo, sid, st):
     rc, tail = run_probe(repo, st["cmd"])
     st["checked"] = {"head": before[0], "dirty": before[1], "rc": rc, "stable": work_state(repo) == before}
     if rc == 0:
-        st["status"] = "proven"
+        closes, note = fix_at_origin(repo, st)
+        if closes:
+            st["status"] = "proven"
         write_repro(repo, sid, st)
-        print("[proof-of-fix] ✓ fix proven — the recorded repro now passes")
-        return True
+        print(f"[proof-of-fix] ✓ fix proven — the recorded repro now passes{note}" if closes
+              else f"[proof-of-fix] ✗ not proven — the probe passes, but {note}")
+        return closes
     st["tail"] = tail
     write_repro(repo, sid, st)
     print(f"[proof-of-fix] ✗ still failing (exit {rc}) — the recorded repro does not pass yet:\n{tail}")
@@ -426,9 +503,13 @@ def cmd_hook(args):
     st["attempts"] = int(st.get("attempts", 0)) + 1
     rc, tail = run_probe(repo, st["cmd"])
     if rc == 0:
-        st["status"] = "proven"
+        closes, note = fix_at_origin(repo, st)
+        if closes:
+            st["status"] = "proven"
         write_repro(repo, sid, st)
-        print(json.dumps({"systemMessage": "[proof-of-fix] ✓ fix proven — the recorded repro now passes"}))
+        print(json.dumps({"systemMessage": f"[proof-of-fix] ✓ fix proven — the recorded repro now passes{note}"}
+                         if closes else {"decision": "block", "reason": f"[proof-of-fix] The recorded repro "
+                                         f"(`{st['cmd']}`) now passes, but {note}"}))
         return
     st["tail"] = tail
     write_repro(repo, sid, st)
@@ -466,6 +547,8 @@ def main():
     common("forget", cmd_forget).add_argument("--need", required=True)
     common("status", cmd_status).add_argument("--need", default="")
     common("clear", cmd_clear)
+    o = common("origin", cmd_origin)
+    o.add_argument("--commit", default=""); o.add_argument("--exception", default="")
     common("hook", cmd_hook).add_argument("--prompt-id", default="")
     n = common("nudge", cmd_nudge)
     n.add_argument("--prompt", default=""); n.add_argument("--prompt-id", default="")

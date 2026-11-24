@@ -32,6 +32,7 @@ assert_contains 'does not reproduce' "$out" "1. refusal says why"
 out=$(python3 "$REPRO" record --repo "$d" --cmd "test -f fixed.txt" 2>&1); rc=$?
 assert_eq 0 "$rc" "2. failing probe → recorded"
 assert_contains 'failing repro recorded' "$out" "2. record confirms"
+python3 "$REPRO" origin --repo "$d" --exception "fixture without a history" >/dev/null 2>&1
 out=$(python3 "$REPRO" check --repo "$d" 2>&1); rc=$?
 assert_eq 1 "$rc" "2. unfixed → check fails"
 assert_contains 'still failing' "$out" "2. check says still failing"
@@ -59,6 +60,7 @@ assert_eq "" "$out" "3. no git repo → silent"
 # --- 4. stop hook: open repro re-run by the hook — block on red, auto-prove on green ----------------
 d4="$ROOT/t4"; mkrepo "$d4"
 python3 "$REPRO" record --repo "$d4" --session s1 --cmd "test -f done.txt" >/dev/null 2>&1
+python3 "$REPRO" origin --repo "$d4" --session s1 --exception "fixture without a history" >/dev/null 2>&1
 out=$(stop_payload "$d4" s1 | CLAUDE_PLUGIN_ROOT="$PLUGIN" python3 "$STOP_HOOK")
 assert_contains '"decision": "block"' "$out" "4. open repro still red → Stop blocks"
 assert_contains 'check --repo' "$out" "4. the block carries the check command"
@@ -88,6 +90,7 @@ assert_eq 5 "$blocks" "5. blocks capped at 5 even across changing work-states"
 d5b="$ROOT/t5b"; mkrepo "$d5b"
 echo v1 > "$d5b/app.txt"; git -C "$d5b" add -A; git -C "$d5b" commit -qm app
 python3 "$REPRO" record --repo "$d5b" --session s1 --cmd "grep -q fixed app.txt" >/dev/null 2>&1
+python3 "$REPRO" origin --repo "$d5b" --session s1 --commit HEAD >/dev/null 2>&1
 echo "v2 still broken" > "$d5b/app.txt"
 out=$(stop_payload "$d5b" s1 | CLAUDE_PLUGIN_ROOT="$PLUGIN" python3 "$STOP_HOOK")
 assert_contains '"decision": "block"' "$out" "5b. dirty file, probe red → block"
@@ -126,6 +129,7 @@ assert_contains 'additionalContext' "$out" "8. concurrent session B nudged"
 out=$(prompt_payload "$d9" A "still failing, fix it" | CLAUDE_PLUGIN_ROOT="$PLUGIN" python3 "$PROMPT_HOOK")
 assert_eq "" "$out" "8. B's nudge does not re-arm A's"
 CLAUDE_CODE_SESSION_ID=A python3 "$REPRO" record --repo "$d9" --cmd "test -f a-fixed.txt" >/dev/null 2>&1
+CLAUDE_CODE_SESSION_ID=A python3 "$REPRO" origin --repo "$d9" --exception "fixture without a history" >/dev/null 2>&1
 out=$(stop_payload "$d9" B | CLAUDE_PLUGIN_ROOT="$PLUGIN" python3 "$STOP_HOOK")
 assert_eq "" "$out" "8. B's Stop neither runs nor blocks on A's repro"
 CLAUDE_CODE_SESSION_ID=B python3 "$REPRO" record --repo "$d9" --cmd "test -f b-fixed.txt" >/dev/null 2>&1
@@ -305,5 +309,63 @@ python3 "$REPRO" record --repo "$d19" --need N7 --criterion c4 --file ../outside
 assert_eq 1 "$rc" "16. a probe file outside the repo is refused"
 python3 "$REPRO" record --repo "$d19" --need N7 --cmd false --file tests/x.sh >/dev/null 2>&1; rc=$?
 assert_eq 2 "$rc" "16. --file without --criterion is refused, never dropped"
+
+# --- 17. a green probe proves a fix only where the defect originates ---------------------------------
+mkorigin(){ mkrepo "$1"; echo on > "$1/switch.txt"; git -C "$1" add -A; git -C "$1" commit -qm "add switch"
+  echo other > "$1/other.txt"; git -C "$1" add -A; git -C "$1" commit -qm "add other"
+  echo off > "$1/switch.txt"; git -C "$1" add -A; git -C "$1" commit -qm "turn the switch off"; }
+PROBE='test -f guard.txt || grep -q on switch.txt'
+d20="$ROOT/t20"; mkorigin "$d20"; broke=$(git -C "$d20" rev-parse HEAD)
+python3 "$REPRO" record --repo "$d20" --session s1 --cmd "$PROBE" >/dev/null 2>&1
+touch "$d20/guard.txt"
+out=$(python3 "$REPRO" check --repo "$d20" --session s1 2>&1); rc=$?
+assert_eq 1 "$rc" "17. green probe, no origin named → not proven"
+assert_contains 'origin --repo' "$out" "17. the refusal carries the origin command"
+out=$(python3 "$REPRO" origin --repo "$d20" --session s1 --commit 0000000000000000000000000000000000000000 2>&1); rc=$?
+assert_eq 1 "$rc" "17. an unknown commit is refused as origin"
+out=$(python3 "$REPRO" origin --repo "$d20" --session s1 --commit "$broke" 2>&1); rc=$?
+assert_eq 0 "$rc" "17. the introducing commit is accepted as origin"
+assert_contains 'turn the switch off' "$out" "17. the origin is echoed with its subject"
+out=$(python3 "$REPRO" check --repo "$d20" --session s1 2>&1); rc=$?
+assert_eq 1 "$rc" "17. a guard beside the defect turns the probe green → still not proven"
+assert_contains 'switch.txt' "$out" "17. the refusal names the files the origin changed"
+assert_contains '"status": "open"' "$(python3 "$REPRO" status --repo "$d20" --session s1)" "17. the repro stays open"
+out=$(stop_payload "$d20" s1 | CLAUDE_PLUGIN_ROOT="$PLUGIN" python3 "$STOP_HOOK")
+assert_contains '"decision": "block"' "$out" "17. Stop blocks on a green probe whose fix sits around the defect"
+git -C "$d20" add -A; git -C "$d20" commit -qm "add a guard"
+out=$(python3 "$REPRO" origin --repo "$d20" --session s1 --commit HEAD 2>&1); rc=$?
+assert_eq 1 "$rc" "17. a commit made after the record is refused as origin"
+git -C "$d20" rm -q guard.txt; echo on > "$d20/switch.txt"
+out=$(python3 "$REPRO" check --repo "$d20" --session s1 2>&1); rc=$?
+assert_eq 0 "$rc" "17. the fix edits the origin's file → proven"
+assert_contains "$(git -C "$d20" rev-parse --short "$broke")" "$out" "17. the proof names the origin commit"
+d21="$ROOT/t21"; mkorigin "$d21"
+python3 "$REPRO" record --repo "$d21" --session s1 --cmd "$PROBE" >/dev/null 2>&1
+touch "$d21/guard.txt"
+python3 "$REPRO" origin --repo "$d21" --session s1 --exception '  ' >/dev/null 2>&1; rc=$?
+assert_eq 2 "$rc" "17. a blank exception is refused"
+python3 "$REPRO" origin --repo "$d21" --session s1 --exception 'the switch belongs to a vendor service' >/dev/null 2>&1
+out=$(stop_payload "$d21" s1 | CLAUDE_PLUGIN_ROOT="$PLUGIN" python3 "$STOP_HOOK")
+assert_contains 'fix proven' "$out" "17. a declared exception lets the green probe close"
+assert_contains 'vendor service' "$out" "17. and the proof carries the exception"
+d22="$ROOT/t22"; mkorigin "$d22"; broke=$(git -C "$d22" rev-parse HEAD)
+git -C "$d22" mv switch.txt toggle.txt; git -C "$d22" commit -qm "rename the switch"
+python3 "$REPRO" record --repo "$d22" --session s1 --cmd "grep -q on toggle.txt" >/dev/null 2>&1
+python3 "$REPRO" origin --repo "$d22" --session s1 --commit "$broke" >/dev/null 2>&1
+echo on > "$d22/toggle.txt"
+out=$(python3 "$REPRO" check --repo "$d22" --session s1 2>&1); rc=$?
+assert_eq 0 "$rc" "17. the origin's file renamed since → the fix on its new path is proven"
+d23="$ROOT/t23"; mkorigin "$d23"
+python3 "$REPRO" record --repo "$d23" --session s1 --cmd "$PROBE" >/dev/null 2>&1
+python3 "$REPRO" origin --repo "$d23" --session s1 --commit HEAD >/dev/null 2>&1
+out=$(stop_payload "$d23" s1 | CLAUDE_PLUGIN_ROOT="$PLUGIN" python3 "$STOP_HOOK")
+touch "$d23/guard.txt"
+out=$(stop_payload "$d23" s1 | CLAUDE_PLUGIN_ROOT="$PLUGIN" python3 "$STOP_HOOK")
+assert_contains '"decision": "block"' "$out" "17. Stop: green probe around the defect → block"
+python3 "$REPRO" origin --repo "$d23" --session s1 --exception 'incident mitigation, removed by the fix' >/dev/null 2>&1
+out=$(stop_payload "$d23" s1 | CLAUDE_PLUGIN_ROOT="$PLUGIN" python3 "$STOP_HOOK")
+assert_contains 'fix proven' "$out" "17. naming the origin re-arms Stop at the same work state"
+out=$(prompt_payload "$d23" s9 "fix the crash" | CLAUDE_PLUGIN_ROOT="$PLUGIN" python3 "$PROMPT_HOOK")
+assert_contains 'origin --repo' "$out" "17. the nudge carries the origin step"
 
 echo; echo "PASS=$PASS FAIL=$FAIL"; rm -rf "$ROOT"; [ "$FAIL" -eq 0 ]

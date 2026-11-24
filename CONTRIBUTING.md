@@ -41,7 +41,11 @@ A defect found in real usage is fixed **evidence-first**, using the `proof-of-fi
    ```bash
    python3 plugins/proof-of-fix/skills/proof-of-fix/scripts/repro.py record --cmd '<probe>'
    ```
-2. **Fix the root cause** — never the symptom, never a weakened probe.
+2. **Name the origin, then fix the code there.** The commit that introduced the defect is declared
+   before the first edit — never the symptom, never a weakened probe:
+   ```bash
+   python3 plugins/proof-of-fix/skills/proof-of-fix/scripts/repro.py origin --commit <sha>
+   ```
 3. **Prove it with the same probe**, and land the repro as a **permanent test** in the owning suite
    (or `tests/harness/run.sh` when it crosses plugins):
    ```bash
