@@ -124,7 +124,7 @@ plugin degrades to inert rather than crash.
 | `mr-watchdog-session.json` | mr-watchdog | session baselines (engagement) |
 | `mr-watchdog-watch.json` | mr-watchdog | per-HEAD watch dedup |
 | `mr-watchdog-verdict.json` | mr-watchdog | the watcher's last verdict (green, red + log, stopped + reason), bound to the sha it watched |
-| `proof-of-fix.json` | proof-of-fix | each session's active repro (command + recorded red verdict), and each need's probes by criterion (red work state, pinned files, waivers, checks) |
+| `proof-of-fix.json` | proof-of-fix | each session's active repro (command + recorded red verdict, the HEAD it was recorded on, its declared origin), and each need's probes by criterion (red work state, pinned files, waivers, checks) |
 | `conductor.json` | delivery-conductor | the need ledger: which branches a need holds (read by every sibling through `driven()`) |
 
 This lists the coupling and observability state. Per-session nudge-dedup markers (e.g.
